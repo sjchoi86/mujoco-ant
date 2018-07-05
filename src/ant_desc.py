@@ -5,15 +5,17 @@ import numpy as np
 import tensorflow as tf
 import matplotlib.pyplot as plt
 from gym.envs import mujoco
-np.set_printoptions(precision=2)
+np.set_printoptions(precision=2,linewidth=150)
 print ("Packages Loaded")
 
 # PID class
 class PID_class:
-    def __init__(self,Kp=0.001,Ki=0.0,Kd=0.0001,sample_time=0.01,dim=1):
+    def __init__(self,Kp=0.001,Ki=0.0,Kd=0.0001
+         ,windup=100,sample_time=0.01,dim=1):
         self.Kp = Kp
         self.Ki = Ki
         self.Kd = Kd
+        self.windup = windup
         self.sample_time = sample_time
         self.dim = dim
         self.current_time = 0.00
@@ -27,7 +29,7 @@ class PID_class:
         self.DTerm = 0.0
         self.last_error = np.zeros(shape=self.dim)
         # Windup Guard
-        self.windup_guard = 20.0*np.ones(shape=self.dim)
+        self.windup_guard = self.windup*np.ones(shape=self.dim)
         self.output = np.zeros(shape=self.dim)
     def update(self,feedback_value,current_time):
         """Calculates PID value for given reference feedback
@@ -59,7 +61,6 @@ class PID_class:
 
 
 
-
 # Init env
 env = mujoco.AntEnv()
 obs_dim = env.observation_space.shape[0] # 111
@@ -69,20 +70,27 @@ init_qpos = env.init_qpos
 init_qpos[7:] = np.asarray([0,90,0,-90,0,-90,0,90])*np.pi/180.0
 env.set_state(init_qpos,env.init_qvel)
 env.render()
-time.sleep(1)
 print ("Environment initialized. obs_dim:[%d] act_dim:[%d]"
     %(obs_dim,act_dim))
 obs, reward, done, _ = env.step(np.zeros(act_dim))
 
 # Set reference position 
-refPosDeg = np.array([
-    +0, 25
+refPosDeg1 = np.array([
+    +0, 90
     ,0, -90
     ,0, -90
-    ,0, 90],dtype=float)
+    ,0, 90
+    ],dtype=float)
+
+refPosDeg2 = np.array([
+    +40, 20  # +0, 90
+    ,40, -20 # ,0, -90
+    ,40, -20 # ,0, -90
+    ,40, 20 # ,0, 90
+    ],dtype=float)
 
 # Set PID
-PID = PID_class(Kp=0.0005,Ki=0.01,Kd=0.001,sample_time=0.01)
+PID = PID_class(Kp=0.004,Ki=0.01,Kd=0.001,windup=100,sample_time=0.05)
 
 # Run
 for i in range(10000):
@@ -91,6 +99,24 @@ for i in range(10000):
     
     # Time
     t = env.sim.data.time
+
+    # Set refPos
+    if t < 10:
+        refPosDeg = refPosDeg1
+    elif t < 20:
+        refPosDeg = refPosDeg2
+    elif t < 30:
+        refPosDeg = refPosDeg1
+    elif t < 40:
+        refPosDeg = refPosDeg2
+    elif t < 50:
+        refPosDeg = refPosDeg1
+    elif t < 60:
+        refPosDeg = refPosDeg2
+    elif t < 70:
+        refPosDeg = refPosDeg1
+    elif t < 80:
+        refPosDeg = refPosDeg2
 
     # Current position (in Deg)
     cPosDeg = np.asarray(obs[5:13])*180.0/np.pi
@@ -104,9 +130,7 @@ for i in range(10000):
     actionRsh = action[[6,7,0,1,2,3,4,5]]
     obs, reward, done, _ = env.step(actionRsh.astype(np.float16))
     
-
-    print ('t: %.2f'%t,degDiff)
-    print ('action:',action)
+    # Print out
+    print ('t: %.2f\n degDiff: %s'%(t,degDiff))
+    print (' action: %s'%(action))
     
-    
-
