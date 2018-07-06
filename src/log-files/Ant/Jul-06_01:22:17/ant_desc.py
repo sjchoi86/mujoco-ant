@@ -6,13 +6,12 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 from gym.envs import mujoco
 from util import PID_class
-from custom_ant import AntEnvCustom
 np.set_printoptions(precision=2,linewidth=150)
 print ("Packages Loaded")
 
 
 # Init env
-env = AntEnvCustom()
+env = mujoco.AntEnv()
 obs_dim = env.observation_space.shape[0] # 111
 act_dim = env.action_space.shape[0] # 8
 env.reset() # Reset 
@@ -33,7 +32,7 @@ initPosDeg = np.array([
     ],dtype=float)
 
 # Set PID
-PID = PID_class(Kp=0.005,Ki=0.00001,Kd=0.001,windup=10000,sample_time=0.01)
+PID = PID_class(Kp=0.01,Ki=0.001,Kd=0.001,windup=100,sample_time=0.01)
 
 # 
 secTrigger = 10
@@ -49,10 +48,9 @@ for i in range(10000):
 
     # Set refPos every setTrigger 
     if sec > secTrigger:
-        secTrigger = secTrigger + 0.1
-        minPosDeg = np.array([-30,30,-30,-70,-30,-70,-30,30])
-        maxPosDeg = np.array([+30,70,+30,-30,+30,-30,+30,70])
-        refPosDeg = minPosDeg + (maxPosDeg-minPosDeg)*np.random.rand(act_dim)
+        secTrigger = secTrigger + 5
+        degRange = 30.
+        refPosDeg = initPosDeg-degRange+2*degRange*np.random.rand(8)
     
     # Current position (in Deg)
     cPosDeg = np.asarray(obs[5:13])*180.0/np.pi
@@ -67,18 +65,6 @@ for i in range(10000):
     obs, reward, done, _ = env.step(actionRsh.astype(np.float16))
     
     # Print out
-    print ('sec: %.2f done: %s'%(sec,done))
-    print (' cPosDeg:   %s'%(np.array2string(cPosDeg,precision=2,
-        formatter={'float_kind':lambda x: "%.2f" % x},
-        separator=', ',suppress_small=False,sign=' ')))
-    print (' refPosDeg: %s'%(np.array2string(refPosDeg,precision=2,
-        formatter={'float_kind':lambda x: "%.2f" % x},
-        separator=', ',suppress_small=False,sign=' ')))            
-    print (' degDiff:   %s'%(np.array2string(degDiff,precision=2,
-        formatter={'float_kind':lambda x: "%.2f" % x},
-        separator=', ',suppress_small=False,sign=' ')))
-    print (' action:    %s'%(np.array2string(action,precision=2,
-        formatter={'float_kind':lambda x: "%.2f" % x},
-        separator=', ',suppress_small=False,sign=' ')))
-    
+    print ('sec: %.2f\n degDiff: %s'%(sec,degDiff))
+    print (' action: %s'%(action))
     
