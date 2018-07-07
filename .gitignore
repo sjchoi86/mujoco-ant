@@ -105,5 +105,4 @@ venv.bak/
 
 src/log-files
 .DS_Store
-src/.*
-src/_*
+*.pyc
