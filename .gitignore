@@ -1,4 +1,4 @@
 src/log-files
 .DS_Store
-src/.ipynb*
-src/__pycache__
+src/.*
+src/_*
