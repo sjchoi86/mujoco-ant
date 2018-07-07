@@ -1,9 +1,11 @@
 import numpy as np
 
 # PID class
+
+
+
 class PID_class:
-    def __init__(self,Kp=0.001,Ki=0.0,Kd=0.0001
-         ,windup=100,sample_time=0.01,dim=1):
+    def __init__(self,Kp=0.01,Ki=0.00001,Kd=0.001,windup=10000,sample_time=0.01,dim=1):
         self.Kp = Kp
         self.Ki = Ki
         self.Kd = Kd
