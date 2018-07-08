@@ -106,3 +106,6 @@ venv.bak/
 src/log-files
 .DS_Store
 *.pyc
+
+src/.ipynb_checkpoints
+src/__pycache__
