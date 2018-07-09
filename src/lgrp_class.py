@@ -60,14 +60,17 @@ class lgrp_class(object):
     def _define_grp(self):
         tData,xData,lData,nData,hyp,tTest,lTest \
             = self.tData,self.xData,self.lData,self.nData,self.hyp,self.tTest,self.lTest
-        Ktd,_ = kernel_levse(tTest,tData,lTest,lData,hyp)
-        Kdd,_ = kernel_levse(tData,tData,lData,lData,hyp)
+
+        Ktd_mu,_ = kernel_levse(tTest,tData,lTest,np.ones_like(lData),hyp)
+        Ktd_var,_ = kernel_levse(tTest,tData,lTest,lData,hyp)
+        Kdd_mu,_ = kernel_levse(tData,tData,np.ones_like(lData),np.ones_like(lData),hyp)
+        Kdd_var,_ = kernel_levse(tData,tData,lData,lData,hyp)
         Ktt,_ = kernel_levse(tTest,tTest,lTest,lTest,hyp)
         xDataMean = xData.mean(axis=0)
-        muTest = np.matmul(Ktd,np.linalg.solve(
-            Kdd+1e-9*np.eye(nData),xData-xDataMean))+xDataMean
-        _varTest = Ktt - np.matmul(Ktd,np.linalg.solve(
-            Kdd+1e-9*np.eye(nData),Ktd.T))
+        muTest = np.matmul(Ktd_mu,np.linalg.solve(
+            Kdd_mu+1e-9*np.eye(nData),xData-xDataMean))+xDataMean
+        _varTest = Ktt - np.matmul(Ktd_var,np.linalg.solve(
+            Kdd_var+1e-9*np.eye(nData),Ktd_var.T))
         Rtt = np.linalg.cholesky(_varTest+1e-9*np.eye(self.nTest))
         varTest = np.diag(_varTest).reshape((-1,1))
         self.muTest,self._varTest,self.Rtt,self.varTest \
@@ -81,14 +84,15 @@ class lgrp_class(object):
             sampledPaths.append(sampledPath)
         return sampledPaths
     
-    def plot_all(self,_nPath=1):
+    def plot_all(self,_nPath=1,_figsize=(12,6),
+        _titleStr='Leveraged Gaussian Random Paths'):
         # Plot mu, var, and sampled paths
         dim,varTest,tTest,muTest,tData,xData \
             = self.dim,self.varTest,self.tTest,self.muTest,self.tData,self.xData
         sampledPaths = self.sample_paths(_nPath=_nPath)
         cmap = plt.get_cmap('inferno')
         colors = [cmap(i) for i in np.linspace(0,1,dim+1)]
-        plt.figure(figsize=(12,6))
+        plt.figure(figsize=_figsize)
         for dIdx in range(dim):
             # Plot 2-sigma
             sigmaTest = np.sqrt(varTest)
@@ -101,13 +105,13 @@ class lgrp_class(object):
                 hSample,=plt.plot(tTest,sampledPaths[sIdx][:,dIdx:dIdx+1],
                                   linestyle='--',color=colors[dIdx],lw=1)
             # Plot mu
-            hMu,=plt.plot(tTest,muTest[:,dIdx],linestyle='-',color=colors[dIdx],lw=1)
+            hMu,=plt.plot(tTest,muTest[:,dIdx],linestyle='-',color=colors[dIdx],lw=3)
             hData,=plt.plot(tData,xData[:,dIdx],linestyle='None',marker='o',
                             ms=5,mew=2,mfc='w',color=colors[dIdx])
-            plt.xlim(self.tMin-0.1,self.tMax+0.1)
+            plt.xlim(self.tMin-0.1,self.tMax+0.1) 
             plt.ylim(-0.2,1.2)
-        plt.xlabel('Time [s]', fontsize=25)
-        plt.title('Leveraged Gaussian Random Paths',fontsize=20)
+        plt.xlabel('Time [s]', fontsize=20)
+        plt.title(_titleStr,fontsize=20)
         plt.legend([hData,hMu,hVar,hSample],
                ['Anchor Points','Mean Function','Variance Function','Sampled Paths'],
                    fontsize=13)

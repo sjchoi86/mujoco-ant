@@ -1,14 +1,37 @@
+import math
 import numpy as np
 from gym.envs.mujoco import mujoco_env
 from gym import utils
 
+def quaternion_to_euler_angle(w, x, y, z):
+	ysqr = y * y
+	t0 = +2.0 * (w * x + y * z)
+	t1 = +1.0 - 2.0 * (x * x + ysqr)
+	X = math.degrees(math.atan2(t0, t1))
+	
+	t2 = +2.0 * (w * y - z * x)
+	t2 = +1.0 if t2 > +1.0 else t2
+	t2 = -1.0 if t2 < -1.0 else t2
+	Y = math.degrees(math.asin(t2))
+	
+	t3 = +2.0 * (w * z + x * y)
+	t4 = +1.0 - 2.0 * (ysqr + z * z)
+	Z = math.degrees(math.atan2(t3, t4))
+	
+	return X, Y, Z
 
 class AntEnvCustom(mujoco_env.MujocoEnv,utils.EzPickle):
     def __init__(self):
-        print ("Ant custom env -SJ")
+        print ("Custom Ant Environment made by SJ.")
         xmlPath = '/Users/sungjoon/github/mujoco-ant/src/ant_custom.xml'
         mujoco_env.MujocoEnv.__init__(self, xmlPath, frame_skip=5)
         utils.EzPickle.__init__(self)
+
+        self.minPosDeg = np.array([-30,30,-30,-70,-30,-70,-30,30])
+        self.maxPosDeg = np.array([+30,70,+30,-30,+30,-30,+30,70])
+
+        # Do reset once 
+        self.reset()
 
     def step(self, a):
         xposbefore = self.get_body_com("torso")[0]
@@ -47,3 +70,8 @@ class AntEnvCustom(mujoco_env.MujocoEnv,utils.EzPickle):
 
     def viewer_setup(self):
         self.viewer.cam.distance = self.model.stat.extent * 1.0
+
+    def get_heading(self):
+        q = self.data.get_body_xquat('torso')
+        rX,rY,rZ = quaternion_to_euler_angle(q[0],q[1],q[2],q[3])
+        return rZ

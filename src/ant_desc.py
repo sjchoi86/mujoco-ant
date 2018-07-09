@@ -14,6 +14,7 @@ np.set_printoptions(precision=2,linewidth=150)
 env = AntEnvCustom()
 obs_dim = env.observation_space.shape[0] # 111
 act_dim = env.action_space.shape[0] # 8
+dT = env.dt
 env.reset() # Reset 
 init_qpos = env.init_qpos
 init_qpos[7:] = np.asarray([0,90,0,-90,0,-90,0,90])*np.pi/180.0
@@ -32,7 +33,7 @@ initPosDeg = np.array([
     ],dtype=float)
 
 # Set PID
-PID = PID_class(Kp=0.01,Ki=0.00001,Kd=0.001,windup=10000,sample_time=0.01,dim=8)
+PID = PID_class(Kp=0.01,Ki=0.00001,Kd=0.001,windup=10000,sample_time=dT,dim=8)
 
 # 
 secTrigger = 0 
@@ -69,6 +70,7 @@ for tick in range(maxTick):
     # Print out
     DO_PRINT = True
     if DO_PRINT:
+        print () # Empty space 
         print ('tick: [%d] sec: [%.2f] done: %s'%(tick,sec,done))
         print (' cPosDeg:   %s'%(np.array2string(cPosDeg,precision=2,
             formatter={'float_kind':lambda x: "%.2f" % x},
@@ -84,5 +86,4 @@ for tick in range(maxTick):
             separator=', ',suppress_small=False,sign=' ')))
         print (' reward:    %.3f (fwd:%.3f ctrl:%.3f)'
             %(reward,rwdDetal['reward_forward'],rwdDetal['reward_ctrl']))
-    
     
