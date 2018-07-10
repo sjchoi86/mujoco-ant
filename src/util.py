@@ -78,6 +78,7 @@ class PID_class:
             self.last_error = error
             self.output = self.PTerm + (self.Ki * self.ITerm) + (self.Kd * self.DTerm)
 
+# Convert quaternion to euler angle (for MuJoCo)
 def quaternion_to_euler_angle(w, x, y, z):
 	ysqr = y * y
 	
@@ -95,3 +96,100 @@ def quaternion_to_euler_angle(w, x, y, z):
 	Z = math.degrees(math.atan2(t3, t4))
 	
 	return X, Y, Z
+
+# Multi-dimensional interpolation
+def multi_dim_interp(_x,_xp,_fp):
+    nOut = _x.shape[0]
+    dimOut = _fp.shape[1]
+    _y = np.zeros(shape=(nOut,dimOut))
+    for dIdx in range(dimOut): # For each dim
+        _y[:,dIdx] = np.interp(_x[:,0],_xp[:,0],_fp[:,dIdx]) 
+    return _y
+
+# Track a given trajectory to pursuit 
+def track_traj_with_pid(env,PID,pursuitTraj,maxRepeat):
+    lenTraj = pursuitTraj.shape[0]
+    cntRepeat = 0
+    # Reset
+    obs_dim,act_dim,dT = env.observation_space.shape[0],env.action_space.shape[0],env.dt
+    obs = env.reset_model()
+    PID.clear()
+    for i in range(10): 
+        sec = env.sim.data.time
+        refPosDeg = pursuitTraj[0,:]
+        cPosDeg = np.asarray(obs[5:13])*180.0/np.pi # Current pos
+        degDiff = cPosDeg-refPosDeg
+        PID.update(degDiff,sec)
+        action = PID.output
+        actionRsh = action[[6,7,0,1,2,3,4,5]] # rearrange
+        obs,_,_,_ = env.step(actionRsh)
+    PID.clear() # Reset PID after burn-in
+    env.sim.data.time = 0
+    tick,frames,titleStrs = 0,[],[]
+    tickPursuit = 0
+    timeList = np.zeros(shape=(lenTraj*maxRepeat)) # 
+    cPosDegList = np.zeros(shape=(lenTraj*maxRepeat,act_dim)) # Current joint trajectory
+    rPosDegList = np.zeros(shape=(lenTraj*maxRepeat,act_dim)) # Reference joint trajectory
+    rewardSum = 0
+    xInit = env.get_body_com("torso")[0]
+    hInit = env.get_heading()
+    while cntRepeat < maxRepeat:
+        # Some info
+        sec = env.sim.data.time # Current time 
+        x = env.get_body_com("torso")[0]
+        q = env.data.get_body_xquat('torso')
+        rX,rY,rZ = quaternion_to_euler_angle(q[0],q[1],q[2],q[3])
+
+        # Render 
+        frame = env.render(mode='rgb_array',width=200,height=200)
+        frames.append(frame) # Append to frames for futher animating 
+        titleStrs.append('%.2fsec x:[%.2f] heading:[%.1f]'%(sec,x,rZ))
+
+        # PID controller 
+        timeList[tick] = sec
+        refPosDeg = pursuitTraj[min(tickPursuit,lenTraj-1),:]
+        rPosDegList[tick,:] = refPosDeg
+        cPosDeg = np.asarray(obs[5:13])*180.0/np.pi # Current pos
+        cPosDegList[tick,:] = cPosDeg
+        degDiff = cPosDeg-refPosDeg
+        PID.update(degDiff,sec)
+
+        # Do action 
+        action = PID.output
+        actionRsh = action[[6,7,0,1,2,3,4,5]] # rearrange
+        obs,reward,done,rwdDetal = env.step(actionRsh.astype(np.float16))
+        rewardSum += reward
+
+        # Print out
+        DO_PRINT = False
+        if DO_PRINT:
+            print ('sec: [%.2f] done: %s'%(sec,done))
+            print (' cPosDeg:   %s'%(np.array2string(cPosDeg,precision=2,
+                formatter={'float_kind':lambda x: "%.2f" % x},
+                separator=', ',suppress_small=False,sign=' ')))
+            print (' refPosDeg: %s'%(np.array2string(refPosDeg,precision=2,
+                formatter={'float_kind':lambda x: "%.2f" % x},
+                separator=', ',suppress_small=False,sign=' ')))           
+            print (' degDiff:   %s'%(np.array2string(degDiff,precision=2,
+                formatter={'float_kind':lambda x: "%.2f" % x},
+                separator=', ',suppress_small=False,sign=' ')))
+            print (' action:    %s'%(np.array2string(action,precision=2,
+                formatter={'float_kind':lambda x: "%.2f" % x},
+                separator=', ',suppress_small=False,sign=' ')))
+            print (' reward:    %.3f (fwd:%.3f+ctrl:%.3f+contact:%.3f+survive:%.3f)'
+                %(reward,rwdDetal['reward_forward'],rwdDetal['reward_ctrl'],
+                  rwdDetal['reward_contact'],rwdDetal['reward_survive']))
+        # Increase tick 
+        tick += 1
+        tickPursuit += 1
+        # Loop handler
+        if tickPursuit >= lenTraj:
+            cntRepeat += 1
+            tickPursuit = 0
+    xFinal = env.get_body_com("torso")[0]
+    hFinal = env.get_heading()
+    xDisp = xFinal - xInit
+    hDisp = hFinal - hInit
+    print ("Repeat:[%d] done. Avg reward is [%.3f]. xDisp is [%.3f]. hDisp is [%.3f]."
+           %(maxRepeat,rewardSum/tick,xDisp,hDisp))
+    return timeList,cPosDegList,rPosDegList,frames,titleStrs
