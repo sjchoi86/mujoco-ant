@@ -1,4 +1,4 @@
-import math
+import math,sys
 import numpy as np
 from gym.envs.mujoco import mujoco_env
 from gym import utils
@@ -23,7 +23,12 @@ def quaternion_to_euler_angle(w, x, y, z):
 class AntEnvCustom(mujoco_env.MujocoEnv,utils.EzPickle):
     def __init__(self):
         print ("Custom Ant Environment made by SJ.")
-        xmlPath = '/Users/sungjoon/github/mujoco-ant/src/ant_custom.xml'
+        if sys.platform == 'darwin': # OSX
+            xmlPath = '/Users/sungjoon/github/mujoco-ant/src/ant_custom.xml'
+        elif sys.platform == 'linux':
+            xmlPath = '/home/sj/github/mujoco-ant/src/ant_custom.xml'
+        else:
+            print ("Unknown platform: [%s]."%(xmlPath))
         mujoco_env.MujocoEnv.__init__(self, xmlPath, frame_skip=5)
         utils.EzPickle.__init__(self)
 
