@@ -109,3 +109,4 @@ src/log-files
 
 src/.ipynb_checkpoints
 src/__pycache__
+src/nets
