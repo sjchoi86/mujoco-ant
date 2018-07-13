@@ -4,6 +4,7 @@ from JSAnimation.IPython_display import display_animation
 from matplotlib import animation
 from IPython.display import display
 import matplotlib.pyplot as plt
+import tensorflow as tf
 
 def display_frames_as_gif(frames,_intv_ms=100,_figsize=(6,6),_fontsize=15,_titleStrs=None):
     plt.figure(figsize=_figsize)
@@ -193,3 +194,9 @@ def track_traj_with_pid(env,PID,pursuitTraj,maxRepeat):
     print ("Repeat:[%d] done. Avg reward is [%.3f]. xDisp is [%.3f]. hDisp is [%.3f]."
            %(maxRepeat,rewardSum/tick,xDisp,hDisp))
     return timeList,cPosDegList,rPosDegList,frames,titleStrs
+
+def gpu_sess():
+    config = tf.ConfigProto(); 
+    config.gpu_options.allow_growth=True
+    sess = tf.Session(config=config)
+    return sess  
