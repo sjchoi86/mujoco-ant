@@ -4,6 +4,7 @@ from JSAnimation.IPython_display import display_animation
 from matplotlib import animation
 from IPython.display import display
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 import tensorflow as tf
 
 def display_frames_as_gif(frames,_intv_ms=100,_figsize=(6,6),_fontsize=15,_titleStrs=None):
@@ -200,3 +201,22 @@ def gpu_sess():
     config.gpu_options.allow_growth=True
     sess = tf.Session(config=config)
     return sess  
+
+def plot_imgs(_imgs,_imgSz=(28,28),_nR=1,_nC=10,_figsize=(15,2),_title=None,_titles=None):
+    nr,nc = _nR,_nC
+    fig = plt.figure(figsize=_figsize)
+    if _title is not None:
+        fig.suptitle(_title, size=15)
+    gs  = gridspec.GridSpec(nr,nc)
+    gs.update(wspace=0.05, hspace=0.05)
+    for i, img in enumerate(_imgs):
+        ax = plt.subplot(gs[i]); plt.axis('off')
+        ax.set_xticklabels([]); ax.set_yticklabels([]); ax.set_aspect('equal')
+        if len(img.shape) == 1:
+            img = np.reshape(img,newshape=_imgSz) 
+        plt.imshow(img,cmap='Greys_r',interpolation='none')
+        plt.clim(0.0, 1.0)
+        if _titles is not None:
+            plt.title(_titles[i],size=12)
+    plt.show()
+
