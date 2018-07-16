@@ -109,7 +109,7 @@ def multi_dim_interp(_x,_xp,_fp):
     return _y
 
 # Track a given trajectory to pursuit 
-def track_traj_with_pid(env,PID,pursuitTraj,maxRepeat):
+def track_traj_with_pid(env,PID,pursuitTraj,maxRepeat,_VERBOSE=True):
     lenTraj = pursuitTraj.shape[0]
     cntRepeat = 0
     # Reset
@@ -192,15 +192,20 @@ def track_traj_with_pid(env,PID,pursuitTraj,maxRepeat):
     hFinal = env.get_heading()
     xDisp = xFinal - xInit
     hDisp = hFinal - hInit
-    print ("Repeat:[%d] done. Avg reward is [%.3f]. xDisp is [%.3f]. hDisp is [%.3f]."
-           %(maxRepeat,rewardSum/tick,xDisp,hDisp))
+    if _VERBOSE:
+        print ("Repeat:[%d] done. Avg reward is [%.3f]. xDisp is [%.3f]. hDisp is [%.3f]."
+               %(maxRepeat,rewardSum/tick,xDisp,hDisp))
     return timeList,cPosDegList,rPosDegList,frames,titleStrs
 
 def gpu_sess():
     config = tf.ConfigProto(); 
     config.gpu_options.allow_growth=True
     sess = tf.Session(config=config)
-    return sess  
+    return sess
+
+def cpu_sess():
+    sess = tf.Session()
+    return sess
 
 def plot_imgs(_imgs,_imgSz=(28,28),_nR=1,_nC=10,_figsize=(15,2),_title=None,_titles=None):
     nr,nc = _nR,_nC

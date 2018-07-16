@@ -32,11 +32,16 @@ class AntEnvCustom(mujoco_env.MujocoEnv,utils.EzPickle):
         mujoco_env.MujocoEnv.__init__(self, xmlPath, frame_skip=5)
         utils.EzPickle.__init__(self)
 
+        # Do reset once 
+        self.reset()
+
+        # Some parameters
         self.minPosDeg = np.array([-30,30,-30,-70,-30,-70,-30,30])
         self.maxPosDeg = np.array([+30,70,+30,-30,+30,-30,+30,70])
 
-        # Do reset once 
-        self.reset()
+        # Observation and action dimensions 
+        self.obsDim = self.observation_space.shape[0]
+        self.actDim = self.action_space.shape[0]
 
     def step(self, a):
         xposbefore = self.get_body_com("torso")[0]

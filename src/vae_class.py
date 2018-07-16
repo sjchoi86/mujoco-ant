@@ -152,13 +152,14 @@ class vae_class(object):
 
     # Train
     def train(self,_sess,_X,_Y,_C,_Q,_maxIter,_batchSize,_PRINT_EVERY=100,_PLOT_EVERY=100,
-        _imgSz=(28,28),_figsize=(15,2),_nR=1,_nC=10,_LR_SCHEDULE=True):
+        _imgSz=(28,28),_figsize=(15,2),_nR=1,_nC=10,_LR_SCHEDULE=True,_INIT_VAR=True):
         # X: inputs [N x D]
         # C: condition vectors [N x 1]
         # Q: weighting vectors [N x 1]
         self.sess = _sess
         # Initialize variables
-        self.sess.run(tf.global_variables_initializer())
+        if _INIT_VAR:
+            self.sess.run(tf.global_variables_initializer())
         # 
         _maxIter,_batchSize,_PRINT_EVERY,_PLOT_EVERY =\
             (int)(_maxIter),(int)(_batchSize),(int)(_PRINT_EVERY),(int)(_PLOT_EVERY)
@@ -191,21 +192,36 @@ class vae_class(object):
             _,totalLossVal,reconLossWeightedVal,klLossWeightedVal,l2RegVal =\
                  self.sess.run(opers,feed_dict=feeds)
             # Print 
-            if ((_iter%_PRINT_EVERY)==0) | (_iter==(_maxIter-1)):
-                print ("[%04d/%d][%.1f%%] Loss: %.2f(recon:%.2f+kl:%.2f+l2:%.2f)"%
-                       (_iter,_maxIter,100.*_iter/_maxIter,totalLossVal,reconLossWeightedVal,
-                       klLossWeightedVal,l2RegVal))
+            if _PRINT_EVERY != 0:
+                if ((_iter%_PRINT_EVERY)==0) | (_iter==(_maxIter-1)):
+                    print ("[%04d/%d][%.1f%%] Loss: %.2f(recon:%.2f+kl:%.2f+l2:%.2f)"%
+                        (_iter,_maxIter,100.*_iter/_maxIter,totalLossVal,reconLossWeightedVal,
+                        klLossWeightedVal,l2RegVal))
             # Plot
-            if ((_iter%_PLOT_EVERY)==0) | (_iter==(_maxIter-1)):
-                self.test(self.sess,_nR=_nR,_nC=_nC,_C=_C,_X=_X,_Y=_Y,
-                    _imgSz=(28,28),_figsize=(15,2))
+            if _PLOT_EVERY != 0:
+                if ((_iter%_PLOT_EVERY)==0) | (_iter==(_maxIter-1)):
+                    self.test(self.sess,_nR=_nR,_nC=_nC,_C=_C,_X=_X,_Y=_Y,
+                        _imgSz=(28,28),_figsize=(15,2))
+
+    # Sample one 
+    def sample(self,_sess=None,_c=None):
+        if _sess is not None:
+            self.sess = _sess
+        zRandn = 1.*np.random.randn(1,self.zDim)
+        if _c is None:
+            feeds = {self.z:zRandn,self.isTraining:False,self.kp:1.0}
+        else:
+            feeds = {self.z:zRandn,self.c:_c,self.isTraining:False,self.kp:1.0}
+        sampledX = self.sess.run(self.xGivenZ,feed_dict=feeds)
+        return sampledX
 
     # Test            
     def test(self,_sess,_nR,_nC,_C=None,_X=None,_Y=None,
-        _imgSz=(28,28),_figsize=(15,2),_seed=0):
+        _imgSz=(28,28),_figsize=(15,2),_seed=None):
         self.sess = _sess
         # Plot sampled images 
-        np.random.seed(seed=_seed)
+        if _seed is not None:
+            np.random.seed(seed=_seed)
         zRandn = 1.*np.random.randn(_nR*_nC,self.zDim)
         if _C is None: # Original VAE
             # Plot sampled images

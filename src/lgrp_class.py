@@ -16,20 +16,26 @@ class lgrp_class(object):
     def __init__(self,_name,_tData,_xData,_lData,_hyp,_tTest,_lTest):
         # Parse input args 
         self.name = _name
+        self.hyp = _hyp
+        self.tTest = _tTest
+        self.lTest = _lTest
+        self.nTest = self.tTest.shape[0]
+        # Set data
+        self.set_data(_tData=_tData,_xData=_xData,_lData=_lData,_EPS_RU=True)
+
+    def set_data(self,_tData,_xData,_lData,_EPS_RU=True):
         self.tData = _tData
         self.tMin,self.tMax = self.tData.min(),self.tData.max()
         self.xData = _xData
         self.lData = _lData
         self.nData = self.xData.shape[0]
         self.dim = self.xData.shape[1]
-        self.hyp = _hyp
-        self.tTest = _tTest
-        self.lTest = _lTest
-        self.nTest = self.tTest.shape[0]
         # Do epsilon run-up
-        self._eps_runup()
+        if _EPS_RU: 
+            self._eps_runup()
         # Compute GRP
         self._define_grp()
+        
     def _eps_runup(self):
         # Epsilon run-up parameters
         tEps = 2e-2
@@ -84,8 +90,8 @@ class lgrp_class(object):
             sampledPaths.append(sampledPath)
         return sampledPaths
     
-    def plot_all(self,_nPath=1,_figsize=(12,6),
-        _titleStr='Leveraged Gaussian Random Paths'):
+    def plot_all(self,_nPath=1,_figsize=(12,6)):
+        _titleStr=self.name
         # Plot mu, var, and sampled paths
         dim,varTest,tTest,muTest,tData,xData \
             = self.dim,self.varTest,self.tTest,self.muTest,self.tData,self.xData
