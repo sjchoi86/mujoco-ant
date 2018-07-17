@@ -9,7 +9,7 @@ from util import gpu_sess,plot_imgs
 
 class vae_class(object):
     def __init__(self,_name='VAE',_xDim=784,_zDim=10,_hDims=[64,64],_cDim=0,
-                 _actv=tf.nn.relu,_bn=slim.batch_norm,
+                 _actv=tf.nn.relu,_outActv=tf.nn.sigmoid,_bn=slim.batch_norm,
                  _optimizer=tf.train.AdamOptimizer,
                  _optm_param={'lr':0.001,'beta1':0.9,'beta2':0.999,'epsilon':1e-9},
                  _VERBOSE=True):
@@ -19,6 +19,7 @@ class vae_class(object):
         self.hDims = _hDims # Dimention of hidden layer(s)
         self.cDim  = _cDim # Dimention of conditional vector 
         self.actv  = _actv # Activation function 
+        self.outActv = _outActv
         self.bn    = _bn # Batch norm (slim.batch_norm / None)
         self.optimizer = _optimizer # Optimizer
         self.optm_param = _optm_param # Optimizer parameters
@@ -77,8 +78,8 @@ class vae_class(object):
                     _net = slim.fully_connected(_net,_hDim,scope='dec_lin'+str(hIdx))
                     _net = slim.dropout(_net,keep_prob=self.kp,is_training=self.isTraining
                                         ,scope='dec_dr'+str(hIdx))
-                # Reconstruct output (NO ACTIVATION)
-                self.xRecon = slim.fully_connected(_net,self.xDim,scope='xRecon',activation_fn=None)
+                # Reconstruct output 
+                self.xRecon = slim.fully_connected(_net,self.xDim,scope='xRecon',activation_fn=self.outActv)
         # Additional graph for debugging purposes
         with tf.variable_scope(self.name,reuse=True) as scope:
             with slim.arg_scope([slim.fully_connected],activation_fn=self.actv,
@@ -96,8 +97,8 @@ class vae_class(object):
                 for hIdx in range(len(self.hDims)): # Loop over hidden layers
                     _hDim = self.hDims[len(self.hDims)-hIdx-1]
                     _net = slim.fully_connected(_net,_hDim,scope='dec_lin'+str(hIdx))
-                # Reconstruct output (NO ACTIVATION)
-                self.xGivenZ = slim.fully_connected(_net,self.xDim,scope='xRecon',activation_fn=None)
+                # Reconstruct output 
+                self.xGivenZ = slim.fully_connected(_net,self.xDim,scope='xRecon',activation_fn=self.outActv)
 
     def _build_graph(self):
         # Original VAE losses
