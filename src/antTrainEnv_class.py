@@ -14,7 +14,7 @@ class antTrainEnv_class(object):
         # Some parameters
         self.tMin = 0
         self.tMax = 3
-        self.nAnchor = 10
+        self.nAnchor = 15
         self.maxRepeat = 3
         
         # Initialize Ant gym 
@@ -29,7 +29,7 @@ class antTrainEnv_class(object):
         lData = np.ones(shape=(nDataPrior,1))
         tTest = np.linspace(start=self.tMin,stop=self.tMax,num=nTest).reshape((-1,1))
         lTest = np.ones(shape=(nTest,1))
-        hyp = {'gain':1/3,'len':1/3,'noise':1e-8} # {'gain':1/4,'len':1/3,'noise':1e-8}
+        hyp = {'gain':1/3,'len':1/4,'noise':1e-8} # {'gain':1/4,'len':1/3,'noise':1e-8}
         self.GRPprior = lgrp_class(_name='GPR Prior',_tData=tData,
                                    _xData=xData,_lData=lData,_tTest=tTest,
                                    _lTest=lTest,_hyp=hyp)
@@ -48,7 +48,7 @@ class antTrainEnv_class(object):
                         sample_time=self.env.dt,dim=self.env.actDim)
         # VAE (this will be our policy function)
         self.VAE = vae_class(_name='VAE',_xDim=self.nAnchor*self.env.actDim,
-                             _zDim=8,_hDims=[32,32],_cDim=0,
+                             _zDim=8,_hDims=[64,64],_cDim=0,
                              _actv=tf.nn.relu,_outActv=None,_bn=None,
                              _optimizer=tf.train.AdamOptimizer,
                              _optm_param={'lr':0.001,'beta1':0.9,'beta2':0.9,'epsilon':1e-8},

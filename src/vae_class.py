@@ -109,13 +109,13 @@ class vae_class(object):
         self._reconLoss = 0.5*tf.norm(self.xRecon-self.x,ord=1,axis=1)
         self._reconLossWeighted = qVal*self._reconLoss
         self._reconLossWeighted = tf.clip_by_value(t=self._reconLossWeighted,\
-            clip_value_min=-5,clip_value_max=1e6) # <== Clip loss
+            clip_value_min=-1,clip_value_max=1e6) # <== Clip loss
         self.reconLossWeighted = tf.reduce_mean(self._reconLossWeighted)
         # KL loss
         self._klLoss = 0.5*tf.reduce_sum(tf.exp(self.zLogVarEncoded)+self.zMuEncoded**2-1.-self.zLogVarEncoded,1)
         self._klLossWeighted = qVal*self._klLoss
         self._klLossWeighted = tf.clip_by_value(t=self._klLossWeighted,\
-            clip_value_min=-5,clip_value_max=1e6) # <== Clip loss
+            clip_value_min=-1,clip_value_max=1e6) # <== Clip loss
         self.klLossWeighted = self.klWeight*tf.reduce_mean(self._klLossWeighted)
 
         # Weight decay
