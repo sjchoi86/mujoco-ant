@@ -7,14 +7,14 @@ from custom_ant import AntEnvCustom # Custom ant
 from lgrp_class import lgrp_class # Gaussian random path
 from vae_class import vae_class # VAE
 
-from util import PID_class,quaternion_to_euler_angle,multi_dim_interp
+from util import PID_class,quaternion_to_euler_angle,multi_dim_interp,Scaler
 
 class antTrainEnv_class(object):
-    def __init__(self):
+    def __init__(self,_PLOT_GRP=True):
         # Some parameters
         self.tMin = 0
         self.tMax = 3
-        self.nAnchor = 15
+        self.nAnchor = 20
         self.maxRepeat = 3
         
         # Initialize Ant gym 
@@ -29,11 +29,14 @@ class antTrainEnv_class(object):
         lData = np.ones(shape=(nDataPrior,1))
         tTest = np.linspace(start=self.tMin,stop=self.tMax,num=nTest).reshape((-1,1))
         lTest = np.ones(shape=(nTest,1))
-        hyp = {'gain':1/3,'len':1/4,'noise':1e-8} # {'gain':1/4,'len':1/3,'noise':1e-8}
+
+        # hyp = {'gain':1/3,'len':1/4,'noise':1e-8} # <= This worked fine
+        hyp = {'gain':1/2,'len':1/4,'noise':1e-8}
         self.GRPprior = lgrp_class(_name='GPR Prior',_tData=tData,
                                    _xData=xData,_lData=lData,_tTest=tTest,
                                    _lTest=lTest,_hyp=hyp)
-        self.GRPprior.plot_all(_nPath=10,_figsize=(12,4))
+        if _PLOT_GRP:
+            self.GRPprior.plot_all(_nPath=10,_figsize=(8,3))
         # GRP posterior
         tData = np.linspace(start=self.tMin,stop=self.tMax,num=self.nAnchor).reshape((-1,1))
         xData = np.random.rand(self.nAnchor,self.env.actDim) # Random positions 
@@ -42,17 +45,58 @@ class antTrainEnv_class(object):
         self.GRPposterior = lgrp_class(_name='GPR Posterior',_tData=tData,
                                    _xData=xData,_lData=lData,_tTest=tTest,
                                    _lTest=lTest,_hyp=hyp)
-        self.GRPposterior.plot_all(_nPath=10,_figsize=(12,4))
+        if _PLOT_GRP:
+            self.GRPposterior.plot_all(_nPath=10,_figsize=(8,3))
         # PID controller 
         self.PID = PID_class(Kp=0.01,Ki=0.00001,Kd=0.002,windup=5000,
                         sample_time=self.env.dt,dim=self.env.actDim)
         # VAE (this will be our policy function)
         self.VAE = vae_class(_name='VAE',_xDim=self.nAnchor*self.env.actDim,
-                             _zDim=8,_hDims=[64,64],_cDim=0,
-                             _actv=tf.nn.relu,_outActv=None,_bn=None,
+                             _zDim=16,_hDims=[64,64],_cDim=0,
+                             _actv=tf.nn.tanh,_outActv=None,_bn=None,
                              _optimizer=tf.train.AdamOptimizer,
                              _optm_param={'lr':0.001,'beta1':0.9,'beta2':0.9,'epsilon':1e-8},
                              _VERBOSE=False)
+        # Reward Scaler
+        self.qScaler = Scaler(1)
+
+    # Basic functionality test (sample and rollout)
+    def basic_test(self):
+        # Sample Trajectory for GP prior
+        avgRwdPrior,retPrior = self.unit_rollout_from_grp_prior(self.maxRepeat)
+        print ("[Prior] avgRwd:[%.3f] xDisp:[%.3f] hDisp:[%.3f]"%
+            (avgRwdPrior,retPrior['xDisp'],retPrior['hDisp']))
+        # Set anchor points from trajectory
+        self.set_anchor_grp_posterior_from_traj(retPrior['sampledTraj'],_levBtw=0.8)
+        avgRwdMean,retMean = self.unit_rollout_from_grp_mean(self.maxRepeat)
+        print ("[Mean]  avgRwd:[%.3f] xDisp:[%.3f] hDisp:[%.3f]"%
+            (avgRwdMean,retMean['xDisp'],retMean['hDisp']))
+        avgRwdPost,retPost = self.unit_rollout_from_grp_posterior(self.maxRepeat)
+        print ("[Post]  avgRwd:[%.3f] xDisp:[%.3f] hDisp:[%.3f]"%
+            (avgRwdPost,retPost['xDisp'],retPost['hDisp']))
+
+        # Plot
+        cmap = plt.get_cmap('inferno')
+        colors = [cmap(i) for i in np.linspace(0,1,self.env.actDim+1)]
+        plt.figure(figsize=(12,5))
+        muTest = self.GRPposterior.muTest
+        sigmaTest = np.sqrt(self.GRPposterior.varTest)
+        for dIdx in range(self.env.actDim):
+            hVar = plt.fill_between(self.GRPposterior.tTest.squeeze(),
+                            (muTest[:,dIdx:dIdx+1]-2*sigmaTest).squeeze(),
+                            (muTest[:,dIdx:dIdx+1]+2*sigmaTest).squeeze(),
+                            facecolor=colors[dIdx], interpolate=True, alpha=0.2)
+            hPrior,=plt.plot(self.GRPposterior.tTest,retPrior['sampledTraj'][:,dIdx],
+                    '-',color=colors[dIdx],lw=1) 
+            hMean,=plt.plot(self.GRPposterior.tTest,retMean['sampledTraj'][:,dIdx],
+                    ':',color=colors[dIdx],lw=2)
+            hPost,=plt.plot(self.GRPposterior.tTest,retPost['sampledTraj'][:,dIdx],
+                    '--',color=colors[dIdx],lw=2)
+        plt.legend([hPrior,hMean,hPost,hVar],
+            ['Sampled from Prior (original)','GRP Mean','Sampled from Posterior','GRP Var.'],
+            fontsize=13)
+        plt.show()
+
     # Scale-up trajectory
     def scale_up_traj(self,rawTraj):
         return self.env.minPosDeg+(self.env.maxPosDeg-self.env.minPosDeg)*rawTraj
@@ -64,7 +108,7 @@ class antTrainEnv_class(object):
         # Reset
         obs = self.env.reset_model()
         self.PID.clear()
-        for i in range(10): 
+        for _ in range(10): 
             sec = self.env.sim.data.time
             refPosDeg = _pursuitTraj[0,:]
             cPosDeg = np.asarray(obs[5:13])*180.0/np.pi # Current pos

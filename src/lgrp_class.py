@@ -116,7 +116,7 @@ class lgrp_class(object):
                             ms=5,mew=2,mfc='w',color=colors[dIdx])
             plt.xlim(self.tMin-0.1,self.tMax+0.1) 
             plt.ylim(-0.2,1.2)
-        plt.xlabel('Time [s]', fontsize=20)
+        plt.xlabel('Time [s]', fontsize=15)
         plt.title(_titleStr,fontsize=20)
         plt.legend([hData,hMu,hVar,hSample],
                ['Anchor Points','Mean Function','Variance Function','Sampled Paths'],
