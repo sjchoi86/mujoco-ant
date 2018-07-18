@@ -47,14 +47,14 @@ class antTrainEnv_class(object):
                                    _lTest=lTest,_hyp=hyp)
         if _PLOT_GRP:
             self.GRPposterior.plot_all(_nPath=10,_figsize=(8,3))
-        # PID controller 
+        # PID controller (Kp=0.01,Ki=0.00001,Kd=0.002,windup=5000)
         self.PID = PID_class(Kp=0.01,Ki=0.00001,Kd=0.002,windup=5000,
                         sample_time=self.env.dt,dim=self.env.actDim)
         # VAE (this will be our policy function)
         self.VAE = vae_class(_name='VAE',_xDim=self.nAnchor*self.env.actDim,
                              _zDim=16,_hDims=[64,64],_cDim=0,
-                             _actv=tf.nn.tanh,_outActv=None,_bn=None,
-                             _optimizer=tf.train.AdamOptimizer,
+                             _actv=tf.nn.tanh,_outActv=None,_qActv=tf.nn.tanh,
+                             _bn=None,_optimizer=tf.train.AdamOptimizer,
                              _optm_param={'lr':0.001,'beta1':0.9,'beta2':0.9,'epsilon':1e-8},
                              _VERBOSE=False)
         # Reward Scaler
@@ -125,6 +125,10 @@ class antTrainEnv_class(object):
         cPosDegList = np.zeros(shape=(lenTraj*_maxRepeat,self.env.actDim)) # Current joint trajectory
         rPosDegList = np.zeros(shape=(lenTraj*_maxRepeat,self.env.actDim)) # Reference joint trajectory
         rewardSum = 0
+        rContactSum = 0
+        rCtrlSum = 0
+        rFwdSum = 0
+        rSrvSum = 0
         xInit = self.env.get_body_com("torso")[0]
         hInit = self.env.get_heading()
         rewards = []
@@ -157,6 +161,12 @@ class antTrainEnv_class(object):
             actionRsh = action[[6,7,0,1,2,3,4,5]] # rearrange
             obs,reward,done,rwdDetal = self.env.step(actionRsh.astype(np.float16))
             rewardSum += reward
+            
+            rContactSum += rwdDetal['reward_contact']
+            rCtrlSum += rwdDetal['reward_ctrl']
+            rFwdSum += rwdDetal['reward_forward']
+            rSrvSum += rwdDetal['reward_survive']
+
             rewards.append(reward)
 
             # Print out (for debugging)
@@ -189,11 +199,21 @@ class antTrainEnv_class(object):
         hFinal = self.env.get_heading()
         xDisp = xFinal - xInit
         hDisp = hFinal - hInit
+
+        rAvg = rewardSum/tick
+        rContactAvg = rContactSum/tick
+        rCtrlAvg = rCtrlSum/tick
+        rFwdAvg = rFwdSum/tick
+        rSrvAvg = rSrvSum/tick
+
+
         if _VERBOSE:
             print ("Repeat:[%d] done. Avg reward is [%.3f]. xDisp is [%.3f]. hDisp is [%.3f]."
-                   %(maxRepeat,rewardSum/tick,xDisp,hDisp))
+                   %(self.maxRepeat,rewardSum/tick,xDisp,hDisp))
         ret = {'rewards':rewards,'frames':frames,'titleStrs':titleStrs,
-              'xDisp':xDisp,'hDisp':hDisp}
+              'xDisp':xDisp,'hDisp':hDisp,
+              'rAvg':rAvg,'rContactAvg':rContactAvg,'rCtrlAvg':rCtrlAvg,
+              'rFwdAvg':rFwdAvg,'rSrvAvg':rSrvAvg}
         return ret
     
     # Sample from GRP prior

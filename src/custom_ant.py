@@ -36,18 +36,25 @@ class AntEnvCustom(mujoco_env.MujocoEnv,utils.EzPickle):
         self.reset()
 
         # Some parameters
-        self.minPosDeg = np.array([-30,30,-30,-70,-30,-70,-30,30])
-        self.maxPosDeg = np.array([+30,70,+30,-30,+30,-30,+30,70])
+        # self.minPosDeg = np.array([-30,30,-30,-70,-30,-70,-30,30])
+        # self.maxPosDeg = np.array([+30,70,+30,-30,+30,-30,+30,70])
+
+        DX = 70
+        self.minPosDeg = np.array([-DX,30,-DX,-70,-DX,-70,-DX,30])
+        self.maxPosDeg = np.array([+DX,70,+DX,-30,+DX,-30,+DX,70])
+
 
         # Observation and action dimensions 
         self.obsDim = self.observation_space.shape[0]
         self.actDim = self.action_space.shape[0]
 
     def step(self, a):
+        headingBefore = self.get_heading()
         xposbefore = self.get_body_com("torso")[0]
         self.do_simulation(a, self.frame_skip) # Run!
+        headingAfter = self.get_heading()
         xposafter = self.get_body_com("torso")[0]
-        forward_reward = (xposafter - xposbefore)/self.dt
+        forward_reward = (xposafter - xposbefore)/self.dt 
         ctrl_cost = .5 * np.square(a).sum()
         contact_cost = 0.5 * 1e-3 * np.sum(
             np.square(np.clip(self.sim.data.cfrc_ext, -1, 1)))

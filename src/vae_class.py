@@ -9,7 +9,7 @@ from util import gpu_sess,plot_imgs
 
 class vae_class(object):
     def __init__(self,_name='VAE',_xDim=784,_zDim=10,_hDims=[64,64],_cDim=0,
-                 _actv=tf.nn.relu,_outActv=tf.nn.sigmoid,_bn=slim.batch_norm,
+                 _actv=tf.nn.relu,_outActv=tf.nn.sigmoid,_qActv=tf.nn.tanh,_bn=slim.batch_norm,
                  _optimizer=tf.train.AdamOptimizer,
                  _optm_param={'lr':0.001,'beta1':0.9,'beta2':0.999,'epsilon':1e-9},
                  _VERBOSE=True):
@@ -20,6 +20,7 @@ class vae_class(object):
         self.cDim  = _cDim # Dimention of conditional vector 
         self.actv  = _actv # Activation function 
         self.outActv = _outActv
+        self.qActv = _qActv
         self.bn    = _bn # Batch norm (slim.batch_norm / None)
         self.optimizer = _optimizer # Optimizer
         self.optm_param = _optm_param # Optimizer parameters
@@ -105,7 +106,13 @@ class vae_class(object):
         # Recon loss
         # qVal = tf.nn.sigmoid(self.q) 
         # qVal = tf.nn.softplus(self.q)
-        qVal = tf.nn.tanh(self.q)
+        # qVal = tf.nn.tanh(self.q)
+        
+        if self.qActv is None:
+            qVal = (self.q)
+        else:
+            qVal = self.qActv(self.q)
+
         self._reconLoss = 0.5*tf.norm(self.xRecon-self.x,ord=1,axis=1)
         self._reconLossWeighted = qVal*self._reconLoss
         self._reconLossWeighted = tf.clip_by_value(t=self._reconLossWeighted,\
