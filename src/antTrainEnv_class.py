@@ -28,9 +28,12 @@ class antTrainEnv_class(object):
         nTest = (int)((self.tMax-self.tMin)/self.env.dt)
         tData = np.linspace(start=self.tMin,stop=self.tMax,num=nDataPrior).reshape((-1,1))
         xData = np.random.rand(nDataPrior,self.env.actDim) # Random positions 
-        # xData[0,:] = xData[0,:]/3.0+1.0/3.0
-        xData[-1,:] = (xData[0,:]+xData[-1,:])/2.0 # Initial and final poses must be the same
-        xData[0,:] = xData[-1,:]
+
+        xData[0,:] = (xData[0,:]+xData[-1,:])/2.0 # Initial and final poses must be the same
+        xData[0,:] = xData[0,:]/3.0+1.0/3.0
+        xData[-1,:] = xData[0,:]
+        lData = np.ones(shape=(nDataPrior,1))
+
         lData = np.ones(shape=(nDataPrior,1))
         tTest = np.linspace(start=self.tMin,stop=self.tMax,num=nTest).reshape((-1,1))
         lTest = np.ones(shape=(nTest,1))
@@ -57,11 +60,19 @@ class antTrainEnv_class(object):
         self.PID = PID_class(Kp=_pGain,Ki=0.00001,Kd=0.002,windup=5000,
                         sample_time=self.env.dt,dim=self.env.actDim)
         # VAE (this will be our policy function)
+
+        # optm = tf.train.AdamOptimizer
+        # optmParam = {'lr':0.001,'beta1':0.9,'beta2':0.9,'epsilon':1e-8}
+
+        optm = tf.train.GradientDescentOptimizer
+        optmParam = {'lr':0.001}
+
         self.VAE = vae_class(_name='VAE',_xDim=self.nAnchor*self.env.actDim,
                              _zDim=_zDim,_hDims=_hDims,_cDim=0,
                              _actv=_vaeActv,_outActv=None,_qActv=tf.nn.tanh,
-                             _bn=None,_optimizer=tf.train.AdamOptimizer,
-                             _optm_param={'lr':0.001,'beta1':0.9,'beta2':0.9,'epsilon':1e-8},
+                             _bn=None,
+                             _optimizer=optm,
+                             _optm_param=optmParam,
                              _VERBOSE=False)
         # Reward Scaler
         self.qScaler = Scaler(1)
@@ -232,9 +243,9 @@ class antTrainEnv_class(object):
         nTest = (int)((self.tMax-self.tMin)/self.env.dt)
         tData = np.linspace(start=self.tMin,stop=self.tMax,num=nDataPrior).reshape((-1,1))
         xData = np.random.rand(nDataPrior,self.env.actDim) # Random positions 
-        # xData[0,:] = xData[0,:]/3.0+1.0/3.0
-        xData[-1,:] = (xData[0,:]+xData[-1,:])/2.0 # Initial and final poses must be the same
-        xData[0,:] = xData[-1,:]
+        xData[0,:] = (xData[0,:]+xData[-1,:])/2.0 # Initial and final poses must be the same
+        xData[0,:] = xData[0,:]/3.0+1.0/3.0
+        xData[-1,:] = xData[0,:]
         lData = np.ones(shape=(nDataPrior,1))
         self.GRPprior.set_data(_tData=tData,_xData=xData,_lData=lData,_EPS_RU=False)
 
@@ -303,8 +314,11 @@ class antTrainEnv_class(object):
 
     # Run
     def train_dlpg(self,_sess,_seed=0,_maxEpoch=500,_batchSize=100,_nIter4update=1e3,
-        _SAVE_VID=True,_MAKE_GIF=False,_PLOT_GRP=False,_PLOT_EVERY=5):
+        _SAVE_VID=True,_MAKE_GIF=False,_PLOT_GRP=False,_PLOT_EVERY=5,_DO_RENDER=True):
         self.sess = _sess
+
+        # Noramlize trajecotry
+        NORMALIZE_SCALE = True 
 
         # Initialize VAE weights
         self.sess.run(tf.global_variables_initializer()) 
@@ -325,14 +339,16 @@ class antTrainEnv_class(object):
 
         for _epoch in range(_maxEpoch):
             priorProb = 0.1+0.4*np.exp(-4*(_epoch/_maxEpoch)**2) # Schedule eps-greedish..
+            levBtw = 0.6+0.3*(1-priorProb)
             for _iter in range(_batchSize):  
                 np.random.seed(seed=(_epoch*_batchSize+_iter)) # ??
                 if (np.random.rand()<priorProb) | (_epoch==0): # Sample from prior
                     avgRwd,ret = self.unit_rollout_from_grp_prior(self.maxRepeat)
                 else: # Sample from posterior (VAE)
                     sampledX = self.VAE.sample(_sess=self.sess).reshape((self.nAnchor,self.env.actDim))
-                    sampledX = (sampledX-sampledX.min())/(sampledX.max()-sampledX.min())
-                    self.set_anchor_grp_posterior(_anchors=sampledX,_levBtw=0.6+0.3*(1-priorProb))
+                    if NORMALIZE_SCALE:
+                        sampledX = (sampledX-sampledX.min())/(sampledX.max()-sampledX.min())
+                    self.set_anchor_grp_posterior(_anchors=sampledX,_levBtw=levBtw)
                     avgRwd,ret = self.unit_rollout_from_grp_posterior(self.maxRepeat)
                 # Get anchor points
                 xInterp = self.get_anchor_from_traj(ret['sampledTraj'])
@@ -357,22 +373,24 @@ class antTrainEnv_class(object):
             xLists[_epoch] = xList
             qLists[_epoch] = qList
             # Get the best out of previous episodes 
-            for _bIdx in range(0,5):
+            for _bIdx in range(0,10):
                 if _bIdx == 0: # Add current one for sure 
                     xAccList = xList
                     qAccList = qList
                 else:
                     xAccList = np.concatenate((xAccList,xLists[max(0,_epoch-_bIdx)]),axis=0)
                     qAccList = np.concatenate((qAccList,qLists[max(0,_epoch-_bIdx)]))
-            # Add high q episodes (batchSize)
+            # Add high q episodes (10)
+            nAddPrevBest = 10
             sortedIdx = np.argsort(-qAccList)
-            xTrain = xAccList[sortedIdx[:_batchSize],:]
-            qTrain = qAccList[sortedIdx[:_batchSize]]
+            xTrain = xAccList[sortedIdx[:nAddPrevBest],:]
+            qTrain = qAccList[sortedIdx[:nAddPrevBest]]
             # Add current episodes (batchSize)
             xTrain = np.concatenate((xTrain,xList),axis=0)
             qTrain = np.concatenate((qTrain,qList))
             # Add random episodes (batchSize)
-            randIdx = np.random.permutation(xAccList.shape[0])[:_batchSize]
+            nRandomAdd = _batchSize 
+            randIdx = np.random.permutation(xAccList.shape[0])[:nRandomAdd]
             xRand = xAccList[randIdx,:]
             qRand = qAccList[randIdx]
             xTrain = np.concatenate((xTrain,xRand),axis=0)
@@ -381,7 +399,9 @@ class antTrainEnv_class(object):
             # Train
             self.qScaler.update(qTrain) # Update Q scaler
             qScale,qOffset = self.qScaler.get() # Scaler 
-            self.VAE.train(_sess=self.sess,_X=xTrain,_Y=None,_C=None,_Q=qScale*(qTrain-qOffset),
+            scaledQ = qScale*(qTrain-qOffset)
+            # print (scaledQ)
+            self.VAE.train(_sess=self.sess,_X=xTrain,_Y=None,_C=None,_Q=scaledQ,
                             _maxIter=_nIter4update,_batchSize=64,_PRINT_EVERY=0,_PLOT_EVERY=0,_INIT_VAR=False)
             # Print
             print ("[%d/%d](#total:%d) avgRwd:[%.3f] XdispMean:[%.3f] XdispVar:[%.3f] absHdispMean:[%.1f] priorProb:[%.2f]"%
@@ -394,11 +414,12 @@ class antTrainEnv_class(object):
             if ((_epoch%_PLOT_EVERY)==0 ) | (_epoch==(_maxEpoch-1)):
                 # Rollout 
                 sampledX = self.VAE.sample(_sess=self.sess).reshape((self.nAnchor,self.env.actDim))
-                sampledX = (sampledX-sampledX.min())/(sampledX.max()-sampledX.min())
-                self.set_anchor_grp_posterior(_anchors=sampledX,_levBtw=0.8)
+                if NORMALIZE_SCALE:
+                    sampledX = (sampledX-sampledX.min())/(sampledX.max()-sampledX.min())
+                self.set_anchor_grp_posterior(_anchors=sampledX,_levBtw=levBtw)
                 avgRwd,ret = self.unit_rollout_from_grp_mean(
-                        _maxRepeat=self.maxRepeat,_DO_RENDER=True)
-                print ("    [Rollout w/ GRP mean] avgRwd:[%.3f](%.3f=contact:%.2f+ctrl:%.2f+fwd:%.2f+heading:%.2f+survive:%.2f) Xdisp:[%.3f] hDisp:[%.1f]"%
+                        _maxRepeat=self.maxRepeat,_DO_RENDER=_DO_RENDER)
+                print ("    [GRP mean] avgRwd:[%.3f](%.3f=cntct:%.2f+ctrl:%.2f+fwd:%.2f+hd:%.2f+srv:%.2f) xD:[%.3f] hD:[%.1f]"%
                         (avgRwd,ret['rAvg'],
                         ret['rContactAvg'],ret['rCtrlAvg'],ret['rFwdAvg'],ret['rHeadingAvg'],ret['rSrvAvg'],
                         ret['xDisp'],ret['hDisp']))
@@ -419,11 +440,12 @@ class antTrainEnv_class(object):
                     for _i in range(nrTrajectories2plot):
                         np.random.seed(seed=_i)
                         sampledX = self.VAE.sample(_sess=self.sess).reshape((self.nAnchor,self.env.actDim))
-                        sampledX = (sampledX-sampledX.min())/(sampledX.max()-sampledX.min())
-                        self.set_anchor_grp_posterior(_anchors=sampledX,_levBtw=0.9)
+                        if NORMALIZE_SCALE:
+                            sampledX = (sampledX-sampledX.min())/(sampledX.max()-sampledX.min())
+                        self.set_anchor_grp_posterior(_anchors=sampledX,_levBtw=levBtw)
                         self.GRPposterior.plot_all(_nPath=1,_figsize=(8,3))
                         avgRwd,ret = self.unit_rollout_from_grp_mean(_maxRepeat=self.maxRepeat,_DO_RENDER=False)
-                        print ("  [GRP-%d] avgRwd:[%.3f](%.3f=contact:%.2f+ctrl:%.2f+fwd:%.2f+heading:%.2f+survive:%.2f) Xdisp:[%.3f] hDisp:[%.1f]"%
+                        print ("  [GRP-%d] avgRwd:[%.3f](%.3f=cntct:%.2f+ctrl:%.2f+fwd:%.2f+hd:%.2f+srv:%.2f) xD:[%.3f] hD:[%.1f]"%
                                 (_i,avgRwd,ret['rAvg'],
                                 ret['rContactAvg'],ret['rCtrlAvg'],ret['rFwdAvg'],ret['rHeadingAvg'],ret['rSrvAvg'],
                                 ret['xDisp'],ret['hDisp']))

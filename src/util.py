@@ -273,7 +273,7 @@ class Scaler(object):
             self.m += n # Total number of data
     def get(self):
         """ returns 2-tuple: (scale, offset) """
-        return 1/(np.sqrt(self.vars) + 0.1)/3, self.means 
+        return 1/(np.sqrt(self.vars) + 0.1)/1.0, self.means 
 
 
 class Logger(object):
