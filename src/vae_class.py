@@ -270,6 +270,9 @@ class vae_class(object):
     # Save 
     def save(self,_sess,_savename=None,_VERBOSE=True):
         """ Save name """
+        directory = 'nets'
+        if not os.path.exists(directory):
+            os.makedirs(directory)
         if _savename==None:
             _savename='nets/net_%s.npz'%(self.name)
         """ Get global variables """

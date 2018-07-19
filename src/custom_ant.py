@@ -1,4 +1,4 @@
-import math,sys
+import math,sys,os
 import numpy as np
 from gym.envs.mujoco import mujoco_env
 from gym import utils
@@ -29,6 +29,8 @@ class AntEnvCustom(mujoco_env.MujocoEnv,utils.EzPickle):
             xmlPath = '/home/sj/github/mujoco-ant/src/ant_custom.xml'
         else:
             print ("Unknown platform: [%s]."%(xmlPath))
+        
+        xmlPath = os.getcwd()+'/ant_custom.xml'
         mujoco_env.MujocoEnv.__init__(self, xmlPath, frame_skip=5)
         utils.EzPickle.__init__(self)
 
