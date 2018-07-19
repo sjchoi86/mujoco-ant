@@ -39,10 +39,11 @@ class AntEnvCustom(mujoco_env.MujocoEnv,utils.EzPickle):
         # self.minPosDeg = np.array([-30,30,-30,-70,-30,-70,-30,30])
         # self.maxPosDeg = np.array([+30,70,+30,-30,+30,-30,+30,70])
 
-        DX = 70
-        self.minPosDeg = np.array([-DX,30,-DX,-70,-DX,-70,-DX,30])
-        self.maxPosDeg = np.array([+DX,70,+DX,-30,+DX,-30,+DX,70])
-
+        D1 = 30
+        D2 = 70
+        DX = 80
+        self.minPosDeg = np.array([-DX,D1,-DX,-D2,-DX,-D2,-DX,D1])
+        self.maxPosDeg = np.array([+DX,D2,+DX,-D1,+DX,-D1,+DX,D2])
 
         # Observation and action dimensions 
         self.obsDim = self.observation_space.shape[0]
@@ -55,11 +56,19 @@ class AntEnvCustom(mujoco_env.MujocoEnv,utils.EzPickle):
         headingAfter = self.get_heading()
         xposafter = self.get_body_com("torso")[0]
         forward_reward = (xposafter - xposbefore)/self.dt 
+        # Modified (upperbound on forward reward)
+        if forward_reward > 1.0: 
+            forward_reward = 1.0
+        # Heading cost
+        heading_cost = 5e-4*headingAfter**2
+        # Control cost
         ctrl_cost = .5 * np.square(a).sum()
+        # Contact cost
         contact_cost = 0.5 * 1e-3 * np.sum(
             np.square(np.clip(self.sim.data.cfrc_ext, -1, 1)))
+        # Survive 
         survive_reward = 1.0 
-        reward = forward_reward - ctrl_cost - contact_cost + survive_reward
+        reward = forward_reward - heading_cost - ctrl_cost - contact_cost + survive_reward
         state = self.state_vector()
         notdone = np.isfinite(state).all() \
             and state[2] >= 0.2 and state[2] <= 1.0
@@ -68,6 +77,7 @@ class AntEnvCustom(mujoco_env.MujocoEnv,utils.EzPickle):
         return ob, reward, done,\
             dict(
                 reward_forward=forward_reward,
+                reward_heading=-heading_cost,
                 reward_ctrl=-ctrl_cost,
                 reward_contact=-contact_cost,
                 reward_survive=survive_reward)
@@ -86,7 +96,7 @@ class AntEnvCustom(mujoco_env.MujocoEnv,utils.EzPickle):
         return self._get_obs()
 
     def viewer_setup(self):
-        self.viewer.cam.distance = self.model.stat.extent * 1.0
+        self.viewer.cam.distance = self.model.stat.extent * 1.5
 
     def get_heading(self):
         q = self.data.get_body_xquat('torso')

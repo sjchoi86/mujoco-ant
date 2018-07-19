@@ -334,7 +334,7 @@ def run_episode(env, policy, scaler, animate=False):
         rewards: shape = (episode len,)
         unscaled_obs: useful for training scaler, shape = (episode len, obs_dim)
     """
-    obs = env.reset()
+    obs = env.reset_model()
     for _ in range(10): 
         obs,_,_,_ = env.step(np.zeros(shape=env.actDim))
     env.sim.data.time = 0
