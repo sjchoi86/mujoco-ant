@@ -12,8 +12,11 @@ from vae_class import vae_class # VAE
 from util import PID_class,quaternion_to_euler_angle,multi_dim_interp,Scaler,display_frames_as_gif
 
 class antTrainEnv_class(object):
-    def __init__(self,_tMax=3,_nAnchor=20,_maxRepeat=3,_hypGain=1/3,_hypLen=1/4,_pGain=0.01,
-            _zDim=16,_hDims=[64,64],_vaeActv=tf.nn.elu,
+    def __init__(self,_tMax=3,_nAnchor=20,_maxRepeat=3,
+            _hypGainPrior=1/3,_hypLenPrior=1/4,
+            _hypGainPost=1/3,_hypLenPost=1/4,
+            _levBtw=0.8,_pGain=0.01,
+            _zDim=16,_hDims=[64,64],_vaeActv=tf.nn.elu,_vaeOutActv=tf.nn.sigmoid,_vaeQactv=None,
             _PLOT_GRP=True):
         # Some parameters
         self.tMin = 0
@@ -28,9 +31,7 @@ class antTrainEnv_class(object):
         nTest = (int)((self.tMax-self.tMin)/self.env.dt)
         tData = np.linspace(start=self.tMin,stop=self.tMax,num=nDataPrior).reshape((-1,1))
         xData = np.random.rand(nDataPrior,self.env.actDim) # Random positions 
-
-        xData[0,:] = (xData[0,:]+xData[-1,:])/2.0 # Initial and final poses must be the same
-        xData[0,:] = xData[0,:]/3.0+1.0/3.0
+        xData[0,:] = (xData[0,:]+xData[-1,:])/2.0
         xData[-1,:] = xData[0,:]
         lData = np.ones(shape=(nDataPrior,1))
 
@@ -39,19 +40,20 @@ class antTrainEnv_class(object):
         lTest = np.ones(shape=(nTest,1))
 
         # hyp = {'gain':1/3,'len':1/4,'noise':1e-8} # <= This worked fine
-        hyp = {'gain':_hypGain,'len':1/4,'noise':1e-8}
+        hypPrior = {'gain':_hypGainPrior,'len':_hypLenPrior,'noise':1e-8}
         self.GRPprior = lgrp_class(_name='GPR Prior',_tData=tData,
                                    _xData=xData,_lData=lData,_tTest=tTest,
-                                   _lTest=lTest,_hyp=hyp)
+                                   _lTest=lTest,_hyp=hypPrior)
             
         # GRP posterior
         tData = np.linspace(start=self.tMin,stop=self.tMax,num=self.nAnchor).reshape((-1,1))
         xData = np.random.rand(self.nAnchor,self.env.actDim) # Random positions 
         lData = np.ones(shape=(self.nAnchor,1))
-        lData[1:self.nAnchor-1] = 0.8
+        lData[1:self.nAnchor-1] = _levBtw
+        hypPost = {'gain':_hypGainPost,'len':_hypLenPost,'noise':1e-8}
         self.GRPposterior = lgrp_class(_name='GPR Posterior',_tData=tData,
                                    _xData=xData,_lData=lData,_tTest=tTest,
-                                   _lTest=lTest,_hyp=hyp)
+                                   _lTest=lTest,_hyp=hypPost)
         if _PLOT_GRP:
             self.GRPprior.plot_all(_nPath=1,_figsize=(12,4))
             self.GRPposterior.plot_all(_nPath=1,_figsize=(12,4))
@@ -69,7 +71,7 @@ class antTrainEnv_class(object):
 
         self.VAE = vae_class(_name='VAE',_xDim=self.nAnchor*self.env.actDim,
                              _zDim=_zDim,_hDims=_hDims,_cDim=0,
-                             _actv=_vaeActv,_outActv=None,_qActv=tf.nn.tanh,
+                             _actv=_vaeActv,_outActv=_vaeOutActv,_qActv=_vaeQactv,
                              _bn=None,
                              _optimizer=optm,
                              _optm_param=optmParam,
@@ -243,8 +245,7 @@ class antTrainEnv_class(object):
         nTest = (int)((self.tMax-self.tMin)/self.env.dt)
         tData = np.linspace(start=self.tMin,stop=self.tMax,num=nDataPrior).reshape((-1,1))
         xData = np.random.rand(nDataPrior,self.env.actDim) # Random positions 
-        xData[0,:] = (xData[0,:]+xData[-1,:])/2.0 # Initial and final poses must be the same
-        xData[0,:] = xData[0,:]/3.0+1.0/3.0
+        xData[0,:] = (xData[0,:]+xData[-1,:])/2.0
         xData[-1,:] = xData[0,:]
         lData = np.ones(shape=(nDataPrior,1))
         self.GRPprior.set_data(_tData=tData,_xData=xData,_lData=lData,_EPS_RU=False)
@@ -338,10 +339,10 @@ class antTrainEnv_class(object):
         rSrvList = np.zeros((_batchSize))
 
         for _epoch in range(_maxEpoch):
-            priorProb = 0.1+0.4*np.exp(-4*(_epoch/_maxEpoch)**2) # Schedule eps-greedish..
-            levBtw = 0.6+0.3*(1-priorProb)
+            priorProb = 0.1+0.8*np.exp(-4*(_epoch/_maxEpoch)**2) # Schedule eps-greedish (0.8->0.1)
+            levBtw = 0.8+0.1*(1-priorProb) # Schedule leveraged GRP (0.8->0.9)
             for _iter in range(_batchSize):  
-                np.random.seed(seed=(_epoch*_batchSize+_iter)) # ??
+                np.random.seed(seed=(_epoch*_batchSize+_iter)) # ?? 
                 if (np.random.rand()<priorProb) | (_epoch==0): # Sample from prior
                     avgRwd,ret = self.unit_rollout_from_grp_prior(self.maxRepeat)
                 else: # Sample from posterior (VAE)
@@ -373,15 +374,15 @@ class antTrainEnv_class(object):
             xLists[_epoch] = xList
             qLists[_epoch] = qList
             # Get the best out of previous episodes 
-            for _bIdx in range(0,10):
+            for _bIdx in range(0,3):
                 if _bIdx == 0: # Add current one for sure 
                     xAccList = xList
                     qAccList = qList
                 else:
                     xAccList = np.concatenate((xAccList,xLists[max(0,_epoch-_bIdx)]),axis=0)
                     qAccList = np.concatenate((qAccList,qLists[max(0,_epoch-_bIdx)]))
-            # Add high q episodes (10)
-            nAddPrevBest = 10
+            # Add high q episodes (_batchSize)
+            nAddPrevBest = _batchSize
             sortedIdx = np.argsort(-qAccList)
             xTrain = xAccList[sortedIdx[:nAddPrevBest],:]
             qTrain = qAccList[sortedIdx[:nAddPrevBest]]
@@ -397,19 +398,20 @@ class antTrainEnv_class(object):
             qTrain = np.concatenate((qTrain,qRand))
             
             # Train
+            self.qScaler.reset() # Reset every update 
             self.qScaler.update(qTrain) # Update Q scaler
             qScale,qOffset = self.qScaler.get() # Scaler 
             scaledQ = qScale*(qTrain-qOffset)
             # print (scaledQ)
             self.VAE.train(_sess=self.sess,_X=xTrain,_Y=None,_C=None,_Q=scaledQ,
-                            _maxIter=_nIter4update,_batchSize=64,_PRINT_EVERY=0,_PLOT_EVERY=0,_INIT_VAR=False)
+                            _maxIter=_nIter4update,_batchSize=128,_PRINT_EVERY=0,_PLOT_EVERY=0,_INIT_VAR=False)
             # Print
             print ("[%d/%d](#total:%d) avgRwd:[%.3f] XdispMean:[%.3f] XdispVar:[%.3f] absHdispMean:[%.1f] priorProb:[%.2f]"%
                 (_epoch,_maxEpoch,(_epoch+1)*_batchSize,qList.mean(),
                     xDispList.mean(),xDispList.var(),np.abs(hDispList).mean(),priorProb))
-            print (" rAvg:[%.3f] = (contact:%.3f+ctrl:%.3f+fwd:%.3f+heading:%.3f+survive:%.3f)"%
+            print (" rAvg:[%.3f] = (contact:%.3f+ctrl:%.3f+fwd:%.3f+heading:%.3f+survive:%.3f) [rMax:%.3f]"%
                 (rAvgList.mean(),rContactList.mean(),rCtrlList.mean(),rFwdList.mean(),rHeadingList.mean(),
-                    rSrvList.mean()))
+                    rSrvList.mean(),rAvgList.max()))
             # SHOW EVERY 
             if ((_epoch%_PLOT_EVERY)==0 ) | (_epoch==(_maxEpoch-1)):
                 # Rollout 

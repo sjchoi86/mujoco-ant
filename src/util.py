@@ -241,10 +241,12 @@ class Scaler(object):
     """
     def __init__(self,obs_dim):
         self.obs_dim = obs_dim
-        self.vars = np.zeros(obs_dim)
-        self.means = np.zeros(obs_dim)
+        self.vars = np.zeros(self.obs_dim)
+        self.means = np.zeros(self.obs_dim)
         self.m = 0
         self.n = 0
+        self.first_pass = True
+    def reset(self):
         self.first_pass = True
     def update(self, x):
         """ Update running mean and variance (this is an exact method)
