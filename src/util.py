@@ -353,3 +353,18 @@ class Logger(object):
         self.f.close()
         if self.VERBOSE:
             print ("[%s] saved."%(self.path))
+
+
+def print_n_txt(_f,_chars,_addNewLine=True,_DO_PRINT=True,_DO_SAVE=True):
+    """
+        Usage:
+            txtName = ('../res/res_%s.txt'%(self.name))
+            f = open(txtName,'w') # Open txt file
+            print_n_txt(_f=f,_chars='Text name: '+txtName,_DO_PRINT=True)
+    """
+    if _DO_SAVE:
+        if _addNewLine: _f.write(_chars+'\n')
+        else: _f.write(_chars)
+        _f.flush();os.fsync(_f.fileno()) # Write to txt
+    if _DO_PRINT:
+        print (_chars)

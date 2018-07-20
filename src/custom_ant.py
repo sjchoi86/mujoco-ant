@@ -62,7 +62,7 @@ class AntEnvCustom(mujoco_env.MujocoEnv,utils.EzPickle):
         if forward_reward > 1.0: 
             forward_reward = 1.0
         # Heading cost
-        heading_cost = 5e-4*headingAfter**2
+        heading_cost = 2e-4*headingAfter**2
         # Control cost
         ctrl_cost = .5 * np.square(a).sum()
         # Contact cost

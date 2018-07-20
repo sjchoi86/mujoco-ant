@@ -392,11 +392,11 @@ def run_episode_vid(env,policy,scaler):
     tick = 0
     frames = []
     rewards = []
-    time_out = False
+    # time_out = False
     reward_sum = 0
     xInit = env.get_body_com("torso")[0]
     hInit = env.get_heading()
-    while not time_out:
+    while not done:
         frames.append(env.render(mode='rgb_array',width=200,height=200))
         obs = obs.astype(np.float32).reshape((1, -1)) # Make rank two
         obs = np.append(obs, [[step]], axis=1)  # add time step feature
@@ -412,7 +412,7 @@ def run_episode_vid(env,policy,scaler):
         step += env.dt  # increment time step feature
         sec = env.sim.data.time # Get time [sec]
         if sec > 9.0:
-            time_out = True
+            done = True
     xFinal = env.get_body_com("torso")[0]
     hFinal = env.get_heading()
     xDisp = xFinal - xInit
