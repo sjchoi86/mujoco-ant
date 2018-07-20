@@ -327,7 +327,8 @@ class antTrainEnv_class(object):
         return avgRwd,ret
 
     # Run
-    def train_dlpg(self,_sess,_seed=0,_maxEpoch=500,_batchSize=100,_nIter4update=1e3,_nPrevBestQ2Add=50,
+    def train_dlpg(self,_sess,_seed=0,_maxEpoch=500,_batchSize=100,_nIter4update=1e3,
+        _nPrevConsider=20,_nPrevBestQ2Add=50,
         _SAVE_VID=True,_MAKE_GIF=False,_PLOT_GRP=False,_PLOT_EVERY=5,_DO_RENDER=True):
         self.sess = _sess
 
@@ -344,8 +345,8 @@ class antTrainEnv_class(object):
         qLists = ['']*_maxEpoch
         
         for _epoch in range(_maxEpoch):
-            priorProb = 0.2+0.8*np.exp(-4*(_epoch/500)**2) # Schedule eps-greedish (0.8->0.1)
-            levBtw = 0.9+0.05*(1-priorProb) # Schedule leveraged GRP (0.8->0.9)
+            priorProb = 0.1+0.8*np.exp(-4*(_epoch/500)**2) # Schedule eps-greedish (0.8->0.1)
+            levBtw = 0.8+0.10*(1-priorProb) # Schedule leveraged GRP (0.8->0.9)
             xDispList,hDispList = np.zeros((_batchSize)),np.zeros((_batchSize))
             rSumList,rContactSumList,rCtrlSumList,rFwdSumList,rHeadingSumList,rSrvSumList = \
                 np.zeros((_batchSize)),np.zeros((_batchSize)),np.zeros((_batchSize)),\
@@ -382,14 +383,14 @@ class antTrainEnv_class(object):
             xLists[_epoch] = xList
             qLists[_epoch] = qList
             # Get the best out of previous episodes 
-            for _bIdx in range(0,3):
+            for _bIdx in range(0,_nPrevConsider):
                 if _bIdx == 0: # Add current one for sure 
                     xAccList = xList
                     qAccList = qList
                 else:
                     xAccList = np.concatenate((xAccList,xLists[max(0,_epoch-_bIdx)]),axis=0)
                     qAccList = np.concatenate((qAccList,qLists[max(0,_epoch-_bIdx)]))
-            # Add high q episodes (_batchSize)
+            # Add high q episodes (_nPrevBestQ2Add)
             nAddPrevBest = _nPrevBestQ2Add
             sortedIdx = np.argsort(-qAccList)
             xTrain = xAccList[sortedIdx[:nAddPrevBest],:]
@@ -397,7 +398,7 @@ class antTrainEnv_class(object):
             # Add current episodes (batchSize)
             xTrain = np.concatenate((xTrain,xList),axis=0)
             qTrain = np.concatenate((qTrain,qList))
-            # Add random episodes (batchSize)
+            # Add random episodes (nRandomAdd)
             nRandomAdd = _batchSize 
             randIdx = np.random.permutation(xAccList.shape[0])[:nRandomAdd]
             xRand = xAccList[randIdx,:]
