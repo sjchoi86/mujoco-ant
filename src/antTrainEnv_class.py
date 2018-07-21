@@ -346,7 +346,7 @@ class antTrainEnv_class(object):
         
         for _epoch in range(_maxEpoch):
             priorProb = 0.1+0.8*np.exp(-4*(_epoch/500)**2) # Schedule eps-greedish (0.8->0.1)
-            levBtw = 0.8+0.10*(1-priorProb) # Schedule leveraged GRP (0.8->0.9)
+            levBtw = 0.8+0.15*(1-priorProb) # Schedule leveraged GRP (0.8->0.95)
             xDispList,hDispList = np.zeros((_batchSize)),np.zeros((_batchSize))
             rSumList,rContactSumList,rCtrlSumList,rFwdSumList,rHeadingSumList,rSrvSumList = \
                 np.zeros((_batchSize)),np.zeros((_batchSize)),np.zeros((_batchSize)),\
