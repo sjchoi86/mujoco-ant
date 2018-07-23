@@ -212,9 +212,11 @@ class vae_class(object):
                         _imgSz=(28,28),_figsize=(15,2))
 
     # Sample one 
-    def sample(self,_sess=None,_c=None):
+    def sample(self,_sess=None,_c=None,_seed=None):
         if _sess is not None:
             self.sess = _sess
+        if _seed is not None:
+            np.random.seed(seed=_seed)
         zRandn = 1.*np.random.randn(1,self.zDim)
         if _c is None:
             feeds = {self.z:zRandn,self.isTraining:False,self.kp:1.0}

@@ -1,24 +1,28 @@
+import os
 import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.slim as slim 
 import matplotlib.pyplot as plt
 
 import skvideo.io
+from datetime import datetime
 
 from custom_ant import AntEnvCustom # Custom ant
 from lgrp_class import lgrp_class # Gaussian random path
 from vae_class import vae_class # VAE
+from ppo import NNValueFunction,Policy,run_episode,run_policy,add_value,discount,\
+    add_disc_sum_rew,add_gae,build_train_set,log_batch_stats,run_episode_vid
 
 from util import PID_class,quaternion_to_euler_angle,multi_dim_interp,Scaler,\
-    display_frames_as_gif,print_n_txt
+    display_frames_as_gif,print_n_txt,Logger
 
-class antTrainEnv_class(object):
+class antTrainEnv_dlpg_class(object):
     def __init__(self,_name='Ant',_tMax=3,_nAnchor=20,_maxRepeat=3,
             _hypGainPrior=1/3,_hypLenPrior=1/4,
             _hypGainPost=1/3,_hypLenPost=1/4,
             _levBtw=0.8,_pGain=0.01,
             _zDim=16,_hDims=[64,64],_vaeActv=tf.nn.elu,_vaeOutActv=tf.nn.sigmoid,_vaeQactv=None,
-            _PLOT_GRP=True,_SAVE_TXT=True):
+            _PLOT_GRP=True,_SAVE_TXT=True,_VERBOSE=True):
         # Some parameters
         self.name = _name
         self.tMin = 0
@@ -26,6 +30,11 @@ class antTrainEnv_class(object):
         self.nAnchor = _nAnchor
         self.maxRepeat = _maxRepeat
         self.SAVE_TXT = _SAVE_TXT
+        self.VERBOSE = _VERBOSE
+
+        # Noramlize trajecotry
+        self.NORMALIZE_SCALE = True 
+
 
         if self.SAVE_TXT:
             txtName = 'results/'+self.name+'.txt'
@@ -77,8 +86,7 @@ class antTrainEnv_class(object):
 
         optm = tf.train.GradientDescentOptimizer
         optmParam = {'lr':0.001}
-
-        self.VAE = vae_class(_name='VAE',_xDim=self.nAnchor*self.env.actDim,
+        self.VAE = vae_class(_name=self.name,_xDim=self.nAnchor*self.env.actDim,
                              _zDim=_zDim,_hDims=_hDims,_cDim=0,
                              _actv=_vaeActv,_outActv=_vaeOutActv,_qActv=_vaeQactv,
                              _bn=None,
@@ -87,7 +95,62 @@ class antTrainEnv_class(object):
                              _VERBOSE=False)
         # Reward Scaler
         self.qScaler = Scaler(1)
+        # Check parameters
+        self.check_params()
 
+
+    # Check parameters
+    def check_params(self):
+        _g_vars = tf.global_variables()
+        self.g_vars = [var for var in _g_vars if '%s/'%(self.name) in var.name]
+        if self.VERBOSE:
+            print ("==== Global Variables ====")
+        for i in range(len(self.g_vars)):
+            w_name  = self.g_vars[i].name
+            w_shape = self.g_vars[i].get_shape().as_list()
+            if self.VERBOSE:
+                print (" [%02d] Name:[%s] Shape:[%s]" % (i,w_name,w_shape))
+        
+    # Save 
+    def save_net(self,_sess,_savename=None):
+        """ Save name """
+        if _savename==None:
+            _savename='nets/net_%s.npz'%(self.name)
+        """ Get global variables """
+        self.g_wnames,self.g_wvals,self.g_wshapes = [],[],[]
+        for i in range(len(self.g_vars)):
+            curr_wname = self.g_vars[i].name
+            curr_wvar  = [v for v in tf.global_variables() if v.name==curr_wname][0]
+            curr_wval  = _sess.run(curr_wvar)
+            
+            curr_wval_sqz = curr_wval
+            # curr_wval_sqz  = curr_wval.squeeze() # ???
+            curr_wval_sqz = np.asanyarray(curr_wval_sqz,order=(1,-1))
+            
+            self.g_wnames.append(curr_wname)
+            self.g_wvals.append(curr_wval_sqz)
+            self.g_wshapes.append(curr_wval.shape)
+        """ Save """
+        np.savez(_savename,g_wnames=self.g_wnames,g_wvals=self.g_wvals,g_wshapes=self.g_wshapes)
+        if self.VERBOSE:
+            print ("[%s] Saved. Size is [%.4f]MB" % 
+                   (_savename,os.path.getsize(_savename)/1000./1000.))
+        
+    # Restore
+    def restore_net(self,_sess,_loadname=None):
+        if _loadname==None:
+            _loadname='nets/net_%s.npz'%(self.name)
+        l = np.load(_loadname)
+        g_wnames = l['g_wnames']
+        g_wvals  = l['g_wvals']
+        g_wshapes = l['g_wshapes']
+        for widx,wname in enumerate(g_wnames):
+            curr_wvar  = [v for v in tf.global_variables() if v.name==wname][0]
+            _sess.run(tf.assign(curr_wvar,g_wvals[widx].reshape(g_wshapes[widx])))
+        if self.VERBOSE:
+            print ("Weight restored from [%s] Size is [%.4f]MB" % 
+                   (_loadname,os.path.getsize(_loadname)/1000./1000.))
+    
     # Basic functionality test (sample and rollout)
     def basic_test(self):
         # Sample Trajectory for GP prior
@@ -131,10 +194,12 @@ class antTrainEnv_class(object):
     
     # Rollout trajectory
     def rollout(self,_pursuitTraj,_maxRepeat=1,_VERBOSE=True,_DO_RENDER=False):
+        
         lenTraj = _pursuitTraj.shape[0]
         cntRepeat = 0
         # Reset
         obs = self.env.reset_model()
+        self.env.seed(0)
         self.PID.clear()
         for _ in range(10): 
             sec = self.env.sim.data.time
@@ -188,6 +253,7 @@ class antTrainEnv_class(object):
             # Do action 
             action = self.PID.output
             actionRsh = action[[6,7,0,1,2,3,4,5]] # rearrange
+
             obs,reward,done,rwdDetal = self.env.step(actionRsh.astype(np.float16))
             rSum += reward
             
@@ -329,11 +395,9 @@ class antTrainEnv_class(object):
     # Run
     def train_dlpg(self,_sess,_seed=0,_maxEpoch=500,_batchSize=100,_nIter4update=1e3,
         _nPrevConsider=20,_nPrevBestQ2Add=50,
-        _SAVE_VID=True,_MAKE_GIF=False,_PLOT_GRP=False,_PLOT_EVERY=5,_DO_RENDER=True):
+        _SAVE_VID=True,_MAKE_GIF=False,_PLOT_GRP=False,
+        _PLOT_EVERY=5,_DO_RENDER=True,_SAVE_NET_EVERY=10):
         self.sess = _sess
-
-        # Noramlize trajecotry
-        NORMALIZE_SCALE = True 
 
         # Initialize VAE weights
         self.sess.run(tf.global_variables_initializer()) 
@@ -345,7 +409,7 @@ class antTrainEnv_class(object):
         qLists = ['']*_maxEpoch
         
         for _epoch in range(_maxEpoch):
-            priorProb = 0.1+0.8*np.exp(-4*(_epoch/500)**2) # Schedule eps-greedish (0.8->0.1)
+            priorProb = 0.1+0.8*np.exp(-4*(_epoch/500)**2) # Schedule eps-greedish (0.9->0.1)
             levBtw = 0.8+0.15*(1-priorProb) # Schedule leveraged GRP (0.8->0.95)
             xDispList,hDispList = np.zeros((_batchSize)),np.zeros((_batchSize))
             rSumList,rContactSumList,rCtrlSumList,rFwdSumList,rHeadingSumList,rSrvSumList = \
@@ -359,7 +423,7 @@ class antTrainEnv_class(object):
                     _,ret = self.unit_rollout_from_grp_prior(self.maxRepeat)
                 else: # Sample from posterior (VAE)
                     sampledX = self.VAE.sample(_sess=self.sess).reshape((self.nAnchor,self.env.actDim))
-                    if NORMALIZE_SCALE:
+                    if self.NORMALIZE_SCALE:
                         sampledX = (sampledX-sampledX.min())/(sampledX.max()-sampledX.min())
                     self.set_anchor_grp_posterior(_anchors=sampledX,_levBtw=levBtw)
                     _,ret = self.unit_rollout_from_grp_posterior(self.maxRepeat)
@@ -430,20 +494,22 @@ class antTrainEnv_class(object):
             if ((_epoch%_PLOT_EVERY)==0 ) | (_epoch==(_maxEpoch-1)):
                 # Rollout 
                 sampledX = self.VAE.sample(_sess=self.sess).reshape((self.nAnchor,self.env.actDim))
-                if NORMALIZE_SCALE:
+                if self.NORMALIZE_SCALE:
                     sampledX = (sampledX-sampledX.min())/(sampledX.max()-sampledX.min())
                 self.set_anchor_grp_posterior(_anchors=sampledX,_levBtw=levBtw)
                 _,ret = self.unit_rollout_from_grp_mean(
                         _maxRepeat=self.maxRepeat,_DO_RENDER=_DO_RENDER)
-                print ("    [GRP mean] sumRwd:%.3f=cntct:%.2f+ctrl:%.2f+fwd:%.2f+hd:%.2f+srv:%.2f) xD:[%.3f] hD:[%.1f]"%
+                str2print = ("    [GRP mean] sumRwd:%.3f=cntct:%.2f+ctrl:%.2f+fwd:%.2f+hd:%.2f+srv:%.2f) xD:[%.3f] hD:[%.1f]"%
                         (ret['rSum'],ret['rContactSum'],ret['rCtrlSum'],ret['rFwdSum'],ret['rHeadingSum'],ret['rSrvSum'],
                          ret['xDisp'],ret['hDisp']))
+                print_n_txt(_f=self.f,_chars=str2print,_DO_PRINT=True,_DO_SAVE=self.SAVE_TXT)
                 # Make video
                 if _SAVE_VID: 
                     outputdata = np.asarray(ret['frames']).astype(np.uint8)
                     vidName = 'vids/ant_dlpg_epoch%03d.mp4'%(_epoch)
                     skvideo.io.vwrite(vidName,outputdata)
-                    print ("     Video [%s] saved."%(vidName))
+                    str2print =  ("     Video [%s] saved."%(vidName))
+                    print_n_txt(_f=self.f,_chars=str2print,_DO_PRINT=True,_DO_SAVE=self.SAVE_TXT)
                 # Make GIF 
                 if _MAKE_GIF:
                     NSKIP = 3 # For memory issues
@@ -455,13 +521,147 @@ class antTrainEnv_class(object):
                     for _i in range(nrTrajectories2plot):
                         np.random.seed(seed=_i)
                         sampledX = self.VAE.sample(_sess=self.sess).reshape((self.nAnchor,self.env.actDim))
-                        if NORMALIZE_SCALE:
+                        if self.NORMALIZE_SCALE:
                             sampledX = (sampledX-sampledX.min())/(sampledX.max()-sampledX.min())
                         self.set_anchor_grp_posterior(_anchors=sampledX,_levBtw=levBtw)
                         self.GRPposterior.plot_all(_nPath=1,_figsize=(8,3))
                         _,ret = self.unit_rollout_from_grp_mean(_maxRepeat=self.maxRepeat,_DO_RENDER=False)
-                        print ("    [GRP-%d] sumRwd:%.3f=cntct:%.2f+ctrl:%.2f+fwd:%.2f+hd:%.2f+srv:%.2f) xD:[%.3f] hD:[%.1f]"%
+                        str2print =  ("    [GRP-%d] sumRwd:%.3f=cntct:%.2f+ctrl:%.2f+fwd:%.2f+hd:%.2f+srv:%.2f) xD:[%.3f] hD:[%.1f]"%
                             (_i,ret['rSum'],ret['rContactSum'],ret['rCtrlSum'],ret['rFwdSum'],ret['rHeadingSum'],ret['rSrvSum'],
                             ret['xDisp'],ret['hDisp']))
+                        print_n_txt(_f=self.f,_chars=str2print,_DO_PRINT=True,_DO_SAVE=self.SAVE_TXT)
+            # Save network every 
+            if ((_epoch%_SAVE_NET_EVERY)==0 ) | (_epoch==(_maxEpoch-1)):
+                saveName = 'nets/net_%s_epoch%04d.npz'%(self.name,_epoch)
+                self.save_net(_sess=_sess,_savename=saveName)
 
+    # Make video using current policy
+    def make_video(self,_vidName=None,_seed=None,_PRINT_VAESAMPLE=False):
+        # Get Anchor points 
+        if _seed is not None:
+            np.random.seed(seed=_seed)
+        sampledX = self.VAE.sample(_sess=self.sess,_seed=_seed).reshape((self.nAnchor,self.env.actDim))
+        if self.NORMALIZE_SCALE:
+            sampledX = (sampledX-sampledX.min())/(sampledX.max()-sampledX.min())
+        # Set GRP
+        levBtw = 1.0
+        self.set_anchor_grp_posterior(_anchors=sampledX,_levBtw=levBtw)
+        # Rollout
+        _,ret = self.unit_rollout_from_grp_mean(
+            _maxRepeat=self.maxRepeat,_DO_RENDER=True)
+        # Make video
+        outputdata = np.asarray(ret['frames']).astype(np.uint8)
+        if _vidName is None:
+            now = datetime.utcnow().strftime("%b-%d_%H:%M:%S")
+            _vidName = 'vids/ant_dlpg_%s.mp4'%(now)
+        skvideo.io.vwrite(_vidName,outputdata)
+        print(" make_video:[%s] saved."%(_vidName))
+        print(" sumRwd:%.3f=cntct:%.2f+ctrl:%.2f+fwd:%.2f+hd:%.2f+srv:%.2f) xD:[%.3f] hD:[%.1f]"%
+            (ret['rSum'],ret['rContactSum'],ret['rCtrlSum'],ret['rFwdSum'],ret['rHeadingSum'],
+            ret['rSrvSum'],ret['xDisp'],ret['hDisp']))
+        
 ## 
+class antTrainEnv_ppo_class(object):
+    def __init__(self):
+        self.env = AntEnvCustom()
+        self.obs_dim = self.env.observation_space.shape[0]
+        self.act_dim = self.env.action_space.shape[0]
+        self.env.reset() # Reset 
+        # render_img = env.render(mode='rgb_array')
+        print ("obs_dim:[%d] act_dim:[%d]"%(self.obs_dim,self.act_dim))
+
+        self.obs_dim += 1  # add 1 to obs dimension for time step feature (see run_episode())
+        # Logger
+        self.env_name = 'Ant'
+        now = datetime.utcnow().strftime("%b-%d_%H:%M:%S")  # create unique directories
+        self.logger = Logger(logName=self.env_name,now=now,_NOTUSE=True)
+        self.aigym_path = os.path.join('/tmp', self.env_name, now)
+        # Scaler
+        self.scaler = Scaler(self.obs_dim)
+        # Value function
+        hid1_mult = 10
+        self.val_func = NNValueFunction(self.obs_dim, hid1_mult) 
+        # Policy Function
+        kl_targ = 0.003
+        policy_logvar = -1.0
+        self.policy = Policy(self.obs_dim,self.act_dim,kl_targ,hid1_mult,policy_logvar) 
+
+    def train(self,_maxEpoch=10000,_batchSize=50,
+                _SAVE_VID=True,_MAKE_GIF=False):
+
+        trajectories = run_policy(self.env,self.policy,self.scaler,self.logger,episodes=5)
+        add_value(trajectories,self.val_func)  # add estimated values to episodes
+        gamma = 0.995 # Discount factor 
+        lam = 0.95 # Lambda for GAE
+        add_disc_sum_rew(trajectories, gamma)  # calculated discounted sum of Rs
+        add_gae(trajectories, gamma, lam)  # calculate advantage
+        print ('observes shape:',trajectories[0]['observes'].shape)
+        print ('actions shape:',trajectories[0]['actions'].shape)
+        print ('rewards shape:',trajectories[0]['rewards'].shape)
+        print ('unscaled_obs shape:',trajectories[0]['unscaled_obs'].shape)
+        print ('values shape:',trajectories[0]['values'].shape)
+        print ('disc_sum_rew shape:',trajectories[0]['disc_sum_rew'].shape)
+        print ('advantages shape:',trajectories[0]['advantages'].shape)
+
+        for _epoch in range(_maxEpoch):
+            # 1. Run policy
+            trajectories = run_policy(self.env,self.policy,self.scaler,self.logger,episodes=_batchSize)
+            # 2. Get (predict) value from the critic network 
+            add_value(trajectories,self.val_func)  # add estimated values to episodes
+            # 3. Get GAE
+            gamma = 0.995 # Discount factor 
+            lam = 0.95 # Lambda for GAE
+            add_disc_sum_rew(trajectories, gamma)  # calculated discounted sum of Rs
+            add_gae(trajectories, gamma, lam)  # calculate advantage
+            # concatenate all episodes into single NumPy arrays
+            observes, actions, advantages, disc_sum_rew = build_train_set(trajectories)
+            # add various stats to training log:
+            # log_batch_stats(observes, actions, advantages, disc_sum_rew, logger, episode)
+            # Update
+            self.policy.update(observes, actions, advantages,self.logger)  # update policy
+            self.val_func.fit(observes, disc_sum_rew,self.logger)  # update value function
+            # logger.write(display=True)  # write logger results to file and stdout
+            
+            # Print
+            for _tIdx in range(len(trajectories)):
+                rs = trajectories[_tIdx]['rewards']
+                if _tIdx == 0: rTotal = rs
+                else: rTotal = np.concatenate((rTotal,rs))
+                # Reward details      
+            reward_contacts,reward_ctrls,reward_forwards,reward_headings,reward_survives = [],[],[],[],[]
+            tickSum = 0
+            for _traj in trajectories:
+                tickSum += _traj['rewards'].shape[0]
+                cTraj = _traj['rDetails']
+                for _iIdx in range(len(cTraj)):
+                    reward_contacts.append(cTraj[_iIdx]['reward_contact'])
+                    reward_ctrls.append(cTraj[_iIdx]['reward_ctrl'])
+                    reward_forwards.append(cTraj[_iIdx]['reward_forward'])
+                    reward_headings.append(cTraj[_iIdx]['reward_heading'])
+                    reward_survives.append(cTraj[_iIdx]['reward_survive'])
+            tickAvg = tickSum / _batchSize
+            sumRwd = rTotal.sum() / _batchSize
+            sumReward_contact = np.asarray(reward_contacts).sum() / _batchSize
+            sumReward_ctrl = np.asarray(reward_ctrls).sum() / _batchSize
+            sumReward_forward = np.asarray(reward_forwards).sum() / _batchSize
+            sumReward_heading = np.asarray(reward_headings).sum() / _batchSize
+            sumReward_survive = np.asarray(reward_survives).sum() / _batchSize
+            print ("[%d/%d](#total:%d) sumRwd:[%.3f](cntct:%.3f+ctrl:%.3f+fwd:%.3f+head:%.3f+srv:%.3f) tickAvg:[%d]"%
+                (_epoch,_maxEpoch,(_epoch+1)*_batchSize,sumRwd,
+                sumReward_contact,sumReward_ctrl,sumReward_forward,sumReward_heading,sumReward_survive,tickAvg))
+            
+            # SHOW EVERY
+            PLOT_EVERY = 20 
+            DO_ANIMATE = False
+            if ((_epoch%PLOT_EVERY)==0 ) | (_epoch==(_maxEpoch-1)):
+                ret = run_episode_vid(self.env,self.policy,self.scaler)
+                print ("  [^] sumRwd:[%.3f] Xdisp:[%.3f] hDisp:[%.1f]"%
+                    (np.asarray(ret['rewards']).sum(),ret['xDisp'],ret['hDisp']))
+                if MAKE_GIF:
+                    display_frames_as_gif(ret['frames'])
+                if SAVE_VID:
+                    outputdata = np.asarray(ret['frames']).astype(np.uint8)
+                    vidName = 'vids/ant_ppo_epoch%03d.mp4'%(_epoch)
+                    skvideo.io.vwrite(vidName,outputdata)
+                    print ("[%s] saved."%(vidName))
+        print ("Done.") 

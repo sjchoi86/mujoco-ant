@@ -33,6 +33,7 @@ class AntEnvCustom(mujoco_env.MujocoEnv,utils.EzPickle):
         xmlPath = os.getcwd()+'/ant_custom.xml'
         mujoco_env.MujocoEnv.__init__(self, xmlPath, frame_skip=5)
         utils.EzPickle.__init__(self)
+    
 
         # Do reset once 
         self.reset()
@@ -73,7 +74,7 @@ class AntEnvCustom(mujoco_env.MujocoEnv,utils.EzPickle):
         reward = forward_reward - heading_cost - ctrl_cost - contact_cost + survive_reward
         state = self.state_vector()
         notdone = np.isfinite(state).all() \
-            and state[2] >= 0.2 and state[2] <= 1.0
+            and state[2] >= 0.2 and state[2] <= 1.2
         done = not notdone
         ob = self._get_obs()
         return ob, reward, done,\
