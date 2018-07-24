@@ -234,6 +234,7 @@ class Policy(object):
         self.sampled_act = (self.means +
                             tf.exp(self.log_vars / 2.0) *
                             tf.random_normal(shape=(self.act_dim,)))
+        self.sampled_act4eval = (self.means)
 
     def _loss_train_op(self):
         """
@@ -269,8 +270,12 @@ class Policy(object):
     def sample(self, obs):
         """Draw sample from policy distribution"""
         feed_dict = {self.obs_ph: obs}
-
         return self.sess.run(self.sampled_act, feed_dict=feed_dict)
+
+    def sample4eval(self, obs):
+        """Draw sample from policy distribution"""
+        feed_dict = {self.obs_ph: obs}
+        return self.sess.run(self.sampled_act4eval, feed_dict=feed_dict)
 
     def update(self, observes, actions, advantages, logger):
         """ Update policy based on observations, actions and advantages
@@ -318,7 +323,7 @@ class Policy(object):
         """ Close TensorFlow session """
         self.sess.close()
 
-def run_episode(env, policy, scaler, animate=False):
+def run_episode(env, policy, scaler, animate=False,_maxSec=9.0):
     """ Run single episode with option to animate
 
     Args:
@@ -371,14 +376,74 @@ def run_episode(env, policy, scaler, animate=False):
         tick += 1
         sec = env.sim.data.time # Get time [sec]
         # print ("tick:[%d] step:[%.2f] sec:[%.2fsec]"%(tick,step,sec))
-        if sec > 9.0:
+        if sec > _maxSec:
             done = True
     # Return (scaled) observations, actions, rewards, and unscaled obersavtions 
     return (np.concatenate(observes), np.concatenate(actions),
             np.array(rewards, dtype=np.float64), np.concatenate(unscaled_obs),
             rDetails)
 
-def run_episode_vid(env,policy,scaler):
+def run_episode4eval(env, policy, scaler, animate=False,_maxSec=9.0):
+    """ Run single episode with option to animate
+
+    Args:
+        env: ai gym environment
+        policy: policy object with sample() method
+        scaler: scaler object, used to scale/offset each observation dimension
+            to a similar range
+        animate: boolean, True uses env.render() method to animate episode
+
+    Returns: 4-tuple of NumPy arrays
+        observes: shape = (episode len, obs_dim)
+        actions: shape = (episode len, act_dim)
+        rewards: shape = (episode len,)
+        unscaled_obs: useful for training scaler, shape = (episode len, obs_dim)
+    """
+    obs = env.reset_model()
+    for _ in range(10): 
+        obs,_,_,_ = env.step(np.zeros(shape=env.actDim))
+    env.sim.data.time = 0
+    observes, actions, rewards, unscaled_obs, rDetails = \
+        [], [], [], [], []
+    done = False
+    step = 0.0
+    scale, offset = scaler.get()
+    scale[-1] = 1.0  # don't scale time step feature
+    offset[-1] = 0.0  # don't offset time step feature
+    tick = 0
+    while not done:
+        if animate:
+            env.render()
+        obs = obs.astype(np.float32).reshape((1, -1)) # Make rank two
+        obs = np.append(obs, [[step]], axis=1)  # add time step feature
+        unscaled_obs.append(obs)
+        # Normalize observations
+        obs = (obs - offset) * scale  # center and scale observations
+        observes.append(obs)
+        # Sample action and make it rank two 
+        action = policy.sample4eval(obs).reshape((1, -1)).astype(np.float32)
+        actions.append(action)
+        # Forward step 
+        obs, reward, done, rDetail = env.step(np.squeeze(action, axis=0))
+        if not isinstance(reward, float):
+            rwd_before = reward
+            rwd_after = np.asscalar(reward)
+            reward = rwd_after
+            print ('rwd: %s => %s'%(rwd_before,rwd_after))
+        rewards.append(reward)
+        rDetails.append(rDetail)
+        step += env.dt  # increment time step feature
+        tick += 1
+        sec = env.sim.data.time # Get time [sec]
+        # print ("tick:[%d] step:[%.2f] sec:[%.2fsec]"%(tick,step,sec))
+        if sec > _maxSec:
+            done = True
+    # Return (scaled) observations, actions, rewards, and unscaled obersavtions 
+    return (np.concatenate(observes), np.concatenate(actions),
+            np.array(rewards, dtype=np.float64), np.concatenate(unscaled_obs),
+            rDetails)
+            
+def run_episode_vid(env,policy,scaler,_maxSec=9.0):
     obs = env.reset_model()
     for _ in range(10): 
         obs,_,_,_ = env.step(np.zeros(shape=env.actDim))
@@ -403,7 +468,7 @@ def run_episode_vid(env,policy,scaler):
         # Normalize observations
         obs = (obs - offset) * scale  # center and scale observations
         # Sample action and make it rank two 
-        action = policy.sample(obs).reshape((1, -1)).astype(np.float32)
+        action = policy.sample4eval(obs).reshape((1, -1)).astype(np.float32)
         # Forward step 
         obs, reward, done, _ = env.step(np.squeeze(action, axis=0))
         rewards.append(reward)
@@ -411,7 +476,7 @@ def run_episode_vid(env,policy,scaler):
         tick += 1
         step += env.dt  # increment time step feature
         sec = env.sim.data.time # Get time [sec]
-        if sec > 9.0:
+        if sec > _maxSec:
             done = True
     xFinal = env.get_body_com("torso")[0]
     hFinal = env.get_heading()
@@ -420,7 +485,7 @@ def run_episode_vid(env,policy,scaler):
     ret = {'frames':frames,'xDisp':xDisp,'hDisp':hDisp,'rewards':rewards}
     return ret     
 
-def run_policy(env, policy, scaler, logger, episodes):
+def run_policy(env, policy, scaler, logger, episodes,_maxSec=9.0):
     """ Run policy and collect data for a minimum of min_steps and min_episodes
 
     Args:
@@ -442,7 +507,43 @@ def run_policy(env, policy, scaler, logger, episodes):
     for e in range(episodes):
         # print ("epi:[%d/%d]"%(e,episodes))
         observes, actions, rewards, unscaled_obs, rDetails =\
-            run_episode(env, policy, scaler)
+            run_episode(env, policy, scaler,_maxSec=_maxSec)
+        total_steps += observes.shape[0]
+        trajectory = {'observes': observes,
+                      'actions': actions,
+                      'rewards': rewards,
+                      'unscaled_obs': unscaled_obs,
+                      'rDetails':rDetails}
+        trajectories.append(trajectory)
+    unscaled = np.concatenate([t['unscaled_obs'] for t in trajectories])
+    scaler.update(unscaled)  # update running statistics for scaling observations
+    logger.log({'_MeanReward': np.mean([t['rewards'].sum() for t in trajectories]),
+                'Steps': total_steps})
+    return trajectories
+
+def run_policy4eval(env, policy, scaler, logger, episodes,_maxSec=9.0):
+    """ Run policy and collect data for a minimum of min_steps and min_episodes
+
+    Args:
+        env: ai gym environment
+        policy: policy object with sample() method
+        scaler: scaler object, used to scale/offset each observation dimension
+            to a similar range
+        logger: logger object, used to save stats from episodes
+        episodes: total episodes to run (=#trajectory)
+
+    Returns: list of trajectory dictionaries, list length = number of episodes
+        'observes' : NumPy array of states from episode
+        'actions' : NumPy array of actions from episode
+        'rewards' : NumPy array of (un-discounted) rewards from episode
+        'unscaled_obs' : NumPy array of (un-discounted) rewards from episode
+    """
+    total_steps = 0
+    trajectories = [] # Empty list 
+    for e in range(episodes):
+        # print ("epi:[%d/%d]"%(e,episodes))
+        observes, actions, rewards, unscaled_obs, rDetails =\
+            run_episode(env, policy, scaler,_maxSec=_maxSec)
         total_steps += observes.shape[0]
         trajectory = {'observes': observes,
                       'actions': actions,

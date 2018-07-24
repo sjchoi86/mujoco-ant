@@ -11,13 +11,15 @@ from custom_ant import AntEnvCustom # Custom ant
 from lgrp_class import lgrp_class # Gaussian random path
 from vae_class import vae_class # VAE
 from ppo import NNValueFunction,Policy,run_episode,run_policy,add_value,discount,\
-    add_disc_sum_rew,add_gae,build_train_set,log_batch_stats,run_episode_vid
+    add_disc_sum_rew,add_gae,build_train_set,log_batch_stats,run_episode_vid,\
+    run_policy4eval,run_episode4eval
 
 from util import PID_class,quaternion_to_euler_angle,multi_dim_interp,Scaler,\
-    display_frames_as_gif,print_n_txt,Logger
+    display_frames_as_gif,print_n_txt,Logger,get_mean_var_from_list
 
 class antTrainEnv_dlpg_class(object):
-    def __init__(self,_name='Ant',_tMax=3,_nAnchor=20,_maxRepeat=3,
+    def __init__(self,_name='Ant',_headingCoef=1e-4,
+            _tMax=3,_nAnchor=20,_maxRepeat=3,
             _hypGainPrior=1/3,_hypLenPrior=1/4,
             _hypGainPost=1/3,_hypLenPost=1/4,
             _levBtw=0.8,_pGain=0.01,
@@ -25,6 +27,7 @@ class antTrainEnv_dlpg_class(object):
             _PLOT_GRP=True,_SAVE_TXT=True,_VERBOSE=True):
         # Some parameters
         self.name = _name
+        self.headingCoef = _headingCoef
         self.tMin = 0
         self.tMax = _tMax
         self.nAnchor = _nAnchor
@@ -43,7 +46,7 @@ class antTrainEnv_dlpg_class(object):
                 _DO_PRINT=True,_DO_SAVE=self.SAVE_TXT)
         
         # Initialize Ant gym 
-        self.env = AntEnvCustom()
+        self.env = AntEnvCustom(_headingCoef=self.headingCoef)
         # GRP sampler (prior)
         nDataPrior = 2
         nTest = (int)((self.tMax-self.tMin)/self.env.dt)
@@ -58,7 +61,7 @@ class antTrainEnv_dlpg_class(object):
         lTest = np.ones(shape=(nTest,1))
 
         # hyp = {'gain':1/3,'len':1/4,'noise':1e-8} # <= This worked fine
-        hypPrior = {'gain':_hypGainPrior,'len':_hypLenPrior,'noise':1e-8}
+        hypPrior = {'gain':_hypGainPrior,'len':_hypLenPrior,'noise':1e-10}
         self.GRPprior = lgrp_class(_name='GPR Prior',_tData=tData,
                                    _xData=xData,_lData=lData,_tTest=tTest,
                                    _lTest=lTest,_hyp=hypPrior)
@@ -68,7 +71,7 @@ class antTrainEnv_dlpg_class(object):
         xData = np.random.rand(self.nAnchor,self.env.actDim) # Random positions 
         lData = np.ones(shape=(self.nAnchor,1))
         lData[1:self.nAnchor-1] = _levBtw
-        hypPost = {'gain':_hypGainPost,'len':_hypLenPost,'noise':1e-8}
+        hypPost = {'gain':_hypGainPost,'len':_hypLenPost,'noise':1e-10}
         self.GRPposterior = lgrp_class(_name='GPR Posterior',_tData=tData,
                                    _xData=xData,_lData=lData,_tTest=tTest,
                                    _lTest=lTest,_hyp=hypPost)
@@ -80,12 +83,10 @@ class antTrainEnv_dlpg_class(object):
         self.PID = PID_class(Kp=_pGain,Ki=0.00001,Kd=0.002,windup=5000,
                         sample_time=self.env.dt,dim=self.env.actDim)
         # VAE (this will be our policy function)
-
-        # optm = tf.train.AdamOptimizer
-        # optmParam = {'lr':0.001,'beta1':0.9,'beta2':0.9,'epsilon':1e-8}
-
-        optm = tf.train.GradientDescentOptimizer
-        optmParam = {'lr':0.001}
+        optm = tf.train.AdamOptimizer
+        optmParam = {'lr':0.001,'beta1':0.9,'beta2':0.999,'epsilon':1e-8}
+        # optm = tf.train.GradientDescentOptimizer
+        # optmParam = {'lr':0.002}
         self.VAE = vae_class(_name=self.name,_xDim=self.nAnchor*self.env.actDim,
                              _zDim=_zDim,_hDims=_hDims,_cDim=0,
                              _actv=_vaeActv,_outActv=_vaeOutActv,_qActv=_vaeQactv,
@@ -400,6 +401,8 @@ class antTrainEnv_dlpg_class(object):
         self.sess = _sess
 
         # Initialize VAE weights
+        np.random.seed(_seed)
+        tf.set_random_seed(_seed)
         self.sess.run(tf.global_variables_initializer()) 
         
         # Expirence memory
@@ -416,7 +419,7 @@ class antTrainEnv_dlpg_class(object):
                 np.zeros((_batchSize)),np.zeros((_batchSize)),np.zeros((_batchSize)),\
                 np.zeros((_batchSize)),np.zeros((_batchSize)),np.zeros((_batchSize))
             for _iter in range(_batchSize):  
-                np.random.seed(seed=(_epoch*_batchSize+_iter)) # 
+                np.random.seed(seed=(_seed+_epoch*_batchSize+_iter)) # 
 
                 # -------------------------------------------------------------------------------------------- #
                 if (np.random.rand()<priorProb) | (_epoch==0): # Sample from prior
@@ -490,6 +493,18 @@ class antTrainEnv_dlpg_class(object):
             print_n_txt(_f=self.f,_chars=str2print,_DO_PRINT=True,_DO_SAVE=self.SAVE_TXT)
 
 
+            # Print current Q using GRP mean 
+            stats = self.get_current_stats()
+            str2print = ("[Stat] Q:[%.3f] xDispMean:[%.3f] hSqMean:[%.1f]"%
+                    (stats['rSumMean'],stats['xDispMean'],stats['hSqMean']))
+            print_n_txt(_f=self.f,_chars=str2print,_DO_PRINT=True,_DO_SAVE=self.SAVE_TXT)
+
+            """
+            stats = {'xDispMean':xDispMean,'hSqMean':hSqMean,'rSumMean':rSumMean,
+            'rContactSumMean':rContactSumMean,'rCtrlSumMean':rCtrlSumMean,'rFwdSumMean':rFwdSumMean,
+            'rHeadingSumMean':rHeadingSumMean,'rSrvSumMean':rSrvSumMean}
+            """
+
             # SHOW EVERY 
             if ((_epoch%_PLOT_EVERY)==0 ) | (_epoch==(_maxEpoch-1)):
                 # Rollout 
@@ -503,10 +518,12 @@ class antTrainEnv_dlpg_class(object):
                         (ret['rSum'],ret['rContactSum'],ret['rCtrlSum'],ret['rFwdSum'],ret['rHeadingSum'],ret['rSrvSum'],
                          ret['xDisp'],ret['hDisp']))
                 print_n_txt(_f=self.f,_chars=str2print,_DO_PRINT=True,_DO_SAVE=self.SAVE_TXT)
-                # Make video
+                # Make video using GRP mean path 
                 if _SAVE_VID: 
                     outputdata = np.asarray(ret['frames']).astype(np.uint8)
-                    vidName = 'vids/ant_dlpg_epoch%03d.mp4'%(_epoch)
+                    folderPath = 'vids/%s'%(self.name)
+                    if not os.path.exists(folderPath): os.makedirs(folderPath)
+                    vidName = folderPath+'/rollout_dlpg_epoch%03d.mp4'%(_epoch)
                     skvideo.io.vwrite(vidName,outputdata)
                     str2print =  ("     Video [%s] saved."%(vidName))
                     print_n_txt(_f=self.f,_chars=str2print,_DO_PRINT=True,_DO_SAVE=self.SAVE_TXT)
@@ -517,27 +534,84 @@ class antTrainEnv_dlpg_class(object):
                                         _titleStrs=ret['titleStrs'][::NSKIP])
                 # Plot sampled trajectories 
                 if _PLOT_GRP:
-                    nrTrajectories2plot = 3
+                    nrTrajectories2plot = 5
                     for _i in range(nrTrajectories2plot):
                         np.random.seed(seed=_i)
                         sampledX = self.VAE.sample(_sess=self.sess).reshape((self.nAnchor,self.env.actDim))
                         if self.NORMALIZE_SCALE:
                             sampledX = (sampledX-sampledX.min())/(sampledX.max()-sampledX.min())
                         self.set_anchor_grp_posterior(_anchors=sampledX,_levBtw=levBtw)
-                        self.GRPposterior.plot_all(_nPath=1,_figsize=(8,3))
+                        fig = self.GRPposterior.plot_all(_nPath=1,_figsize=(8,3))
+                        # Save image
+                        folderPath = 'pics/%s'%(self.name)
+                        if not os.path.exists(folderPath): os.makedirs(folderPath)
+                        saveName = folderPath+'/grp_epoch%04d_%d.png'%(_epoch,_i)
+                        fig.savefig(saveName)
+                        # Rollout
                         _,ret = self.unit_rollout_from_grp_mean(_maxRepeat=self.maxRepeat,_DO_RENDER=False)
                         str2print =  ("    [GRP-%d] sumRwd:%.3f=cntct:%.2f+ctrl:%.2f+fwd:%.2f+hd:%.2f+srv:%.2f) xD:[%.3f] hD:[%.1f]"%
                             (_i,ret['rSum'],ret['rContactSum'],ret['rCtrlSum'],ret['rFwdSum'],ret['rHeadingSum'],ret['rSrvSum'],
                             ret['xDisp'],ret['hDisp']))
                         print_n_txt(_f=self.f,_chars=str2print,_DO_PRINT=True,_DO_SAVE=self.SAVE_TXT)
+
             # Save network every 
             if ((_epoch%_SAVE_NET_EVERY)==0 ) | (_epoch==(_maxEpoch-1)):
-                saveName = 'nets/net_%s_epoch%04d.npz'%(self.name,_epoch)
+                folderPath = 'nets/%s'%(self.name)
+                if not os.path.exists(folderPath): os.makedirs(folderPath)
+                saveName = folderPath+'/net_dlpg_epoch%04d.npz'%(_epoch)
                 self.save_net(_sess=_sess,_savename=saveName)
 
+
+    # Get current statistics
+    def get_current_stats(self):
+        # Some stats to check 
+        """
+        ret = {'rewards':rewards,'frames':frames,'titleStrs':titleStrs,
+              'xDisp':xDisp,'hDisp':hDisp,
+              'rAvg':rAvg,'rContactAvg':rContactAvg,'rCtrlAvg':rCtrlAvg,
+              'rFwdAvg':rFwdAvg,'rHeadingAvg':rHeadingAvg,'rSrvAvg':rSrvAvg,
+              'rSum':rSum,'rContactSum':rContactSum,'rCtrlSum':rCtrlSum,
+              'rFwdSum':rFwdSum,'rHeadingSum':rHeadingSum,'rSrvSum':rSrvSum}
+        """
+        xDisps,hSqDisps = [],[]
+        rSums,rContactSums,rCtrlSums,rFwdSums,rHeadingSums,rSrvSums = [],[],[],[],[],[]
+        # Rollout! 
+        nTest4stat = 10
+        for _i in range(nTest4stat):
+            sampledX = self.VAE.sample(_sess=self.sess).reshape((self.nAnchor,self.env.actDim))
+            if self.NORMALIZE_SCALE:
+                sampledX = (sampledX-sampledX.min())/(sampledX.max()-sampledX.min())
+            self.set_anchor_grp_posterior(_anchors=sampledX,_levBtw=1.0)
+            _,ret = self.unit_rollout_from_grp_mean(
+                    _maxRepeat=self.maxRepeat,_DO_RENDER=False)
+            xDisps.append(ret['xDisp'])
+            hSqDisps.append(ret['hDisp']**2)
+            rSums.append(ret['rSum'])
+            rContactSums.append(ret['rContactSum'])
+            rCtrlSums.append(ret['rCtrlSum'])
+            rFwdSums.append(ret['rFwdSum'])
+            rHeadingSums.append(ret['rHeadingSum'])
+            rSrvSums.append(ret['rSrvSum'])
+
+        xDispMean,_ = get_mean_var_from_list(xDisps)
+        hSqMean,_ = get_mean_var_from_list(hSqDisps)
+        rSumMean,_ = get_mean_var_from_list(rSums)
+        rContactSumMean,_ = get_mean_var_from_list(rContactSums)
+        rCtrlSumMean,_ = get_mean_var_from_list(rCtrlSums)
+        rFwdSumMean,_ = get_mean_var_from_list(rFwdSums)
+        rHeadingSumMean,_ = get_mean_var_from_list(rHeadingSums)
+        rSrvSumMean,_ = get_mean_var_from_list(rSrvSums)
+        stats = {'xDispMean':xDispMean,'hSqMean':hSqMean,'rSumMean':rSumMean,
+            'rContactSumMean':rContactSumMean,'rCtrlSumMean':rCtrlSumMean,'rFwdSumMean':rFwdSumMean,
+            'rHeadingSumMean':rHeadingSumMean,'rSrvSumMean':rSrvSumMean}
+        return stats
+            
+
     # Make video using current policy
-    def make_video(self,_vidName=None,_seed=None,_PRINT_VAESAMPLE=False):
+    def make_video(self,_sess=None,_vidName=None,_seed=None,_PRINT_VAESAMPLE=False):
         # Get Anchor points 
+        if _sess is not None:
+            self.sess = _sess
         if _seed is not None:
             np.random.seed(seed=_seed)
         sampledX = self.VAE.sample(_sess=self.sess,_seed=_seed).reshape((self.nAnchor,self.env.actDim))
@@ -560,10 +634,19 @@ class antTrainEnv_dlpg_class(object):
             (ret['rSum'],ret['rContactSum'],ret['rCtrlSum'],ret['rFwdSum'],ret['rHeadingSum'],
             ret['rSrvSum'],ret['xDisp'],ret['hDisp']))
         
+
+
+
+
+
+
 ## 
 class antTrainEnv_ppo_class(object):
-    def __init__(self):
-        self.env = AntEnvCustom()
+    def __init__(self,_name='ppo',_headingCoef=1e-3):
+        self.name = _name
+        self.headingCoef = _headingCoef
+
+        self.env = AntEnvCustom(_headingCoef=self.headingCoef)
         self.obs_dim = self.env.observation_space.shape[0]
         self.act_dim = self.env.action_space.shape[0]
         self.env.reset() # Reset 
@@ -586,10 +669,12 @@ class antTrainEnv_ppo_class(object):
         policy_logvar = -1.0
         self.policy = Policy(self.obs_dim,self.act_dim,kl_targ,hid1_mult,policy_logvar) 
 
-    def train(self,_maxEpoch=10000,_batchSize=50,
-                _SAVE_VID=True,_MAKE_GIF=False):
-
-        trajectories = run_policy(self.env,self.policy,self.scaler,self.logger,episodes=5)
+    def train(self,_seed=0,_maxEpoch=10000,_batchSize=50,_maxSec=9.0,
+                _SAVE_VID=True,_MAKE_GIF=False,
+                _PLOT_EVERY=10):
+        np.random.seed(_seed)
+        tf.set_random_seed(_seed)
+        trajectories = run_policy(self.env,self.policy,self.scaler,self.logger,episodes=5,_maxSec=_maxSec)
         add_value(trajectories,self.val_func)  # add estimated values to episodes
         gamma = 0.995 # Discount factor 
         lam = 0.95 # Lambda for GAE
@@ -604,8 +689,8 @@ class antTrainEnv_ppo_class(object):
         print ('advantages shape:',trajectories[0]['advantages'].shape)
 
         for _epoch in range(_maxEpoch):
-            # 1. Run policy
-            trajectories = run_policy(self.env,self.policy,self.scaler,self.logger,episodes=_batchSize)
+            # 1. Run policy 
+            trajectories = run_policy(self.env,self.policy,self.scaler,self.logger,episodes=_batchSize,_maxSec=_maxSec)
             # 2. Get (predict) value from the critic network 
             add_value(trajectories,self.val_func)  # add estimated values to episodes
             # 3. Get GAE
@@ -622,7 +707,7 @@ class antTrainEnv_ppo_class(object):
             self.val_func.fit(observes, disc_sum_rew,self.logger)  # update value function
             # logger.write(display=True)  # write logger results to file and stdout
             
-            # Print
+            # Print 
             for _tIdx in range(len(trajectories)):
                 rs = trajectories[_tIdx]['rewards']
                 if _tIdx == 0: rTotal = rs
@@ -649,19 +734,58 @@ class antTrainEnv_ppo_class(object):
             print ("[%d/%d](#total:%d) sumRwd:[%.3f](cntct:%.3f+ctrl:%.3f+fwd:%.3f+head:%.3f+srv:%.3f) tickAvg:[%d]"%
                 (_epoch,_maxEpoch,(_epoch+1)*_batchSize,sumRwd,
                 sumReward_contact,sumReward_ctrl,sumReward_forward,sumReward_heading,sumReward_survive,tickAvg))
-            
-            # SHOW EVERY
-            PLOT_EVERY = 20 
+            #
+            stats = self.get_current_stats(_batchSize=_batchSize,_maxSec=_maxSec)
+            # print (stats)
+            print ("  [eval] sumRwd:[%.3f](cntct:%.3f+ctrl:%.3f+fwd:%.3f+head:%.3f+srv:%.3f) tickAvg:[%d]"%
+                (stats['sumRwd'],
+                stats['sumReward_contact'],stats['sumReward_ctrl'],stats['sumReward_forward'],
+                stats['sumReward_heading'],stats['sumReward_survive'],stats['tickAvg']))
+
+            # SHOW EVERY 
             DO_ANIMATE = False
-            if ((_epoch%PLOT_EVERY)==0 ) | (_epoch==(_maxEpoch-1)):
+            if ((_epoch%_PLOT_EVERY)==0 ) | (_epoch==(_maxEpoch-1)):
                 ret = run_episode_vid(self.env,self.policy,self.scaler)
                 print ("  [^] sumRwd:[%.3f] Xdisp:[%.3f] hDisp:[%.1f]"%
                     (np.asarray(ret['rewards']).sum(),ret['xDisp'],ret['hDisp']))
-                if MAKE_GIF:
+                if _MAKE_GIF:
                     display_frames_as_gif(ret['frames'])
-                if SAVE_VID:
+                if _SAVE_VID:
                     outputdata = np.asarray(ret['frames']).astype(np.uint8)
-                    vidName = 'vids/ant_ppo_epoch%03d.mp4'%(_epoch)
+                    folderPath = 'vids/%s'%(self.name)
+                    if not os.path.exists(folderPath): os.makedirs(folderPath)
+                    vidName = folderPath+'/rollout_ppo_epoch%03d.mp4'%(_epoch)
                     skvideo.io.vwrite(vidName,outputdata)
                     print ("[%s] saved."%(vidName))
         print ("Done.") 
+    
+    def get_current_stats(self,_batchSize,_maxSec):
+        trajectories = run_policy4eval(self.env,self.policy,self.scaler,self.logger,episodes=_batchSize,_maxSec=_maxSec)
+        for _tIdx in range(len(trajectories)):
+            rs = trajectories[_tIdx]['rewards']
+            if _tIdx == 0: rTotal = rs
+            else: rTotal = np.concatenate((rTotal,rs))
+            # Reward details      
+        reward_contacts,reward_ctrls,reward_forwards,reward_headings,reward_survives = [],[],[],[],[]
+        tickSum = 0
+        for _traj in trajectories:
+            tickSum += _traj['rewards'].shape[0]
+            cTraj = _traj['rDetails']
+            for _iIdx in range(len(cTraj)):
+                reward_contacts.append(cTraj[_iIdx]['reward_contact'])
+                reward_ctrls.append(cTraj[_iIdx]['reward_ctrl'])
+                reward_forwards.append(cTraj[_iIdx]['reward_forward'])
+                reward_headings.append(cTraj[_iIdx]['reward_heading'])
+                reward_survives.append(cTraj[_iIdx]['reward_survive'])
+        tickAvg = tickSum / _batchSize
+        sumRwd = rTotal.sum() / _batchSize
+        sumReward_contact = np.asarray(reward_contacts).sum() / _batchSize
+        sumReward_ctrl = np.asarray(reward_ctrls).sum() / _batchSize
+        sumReward_forward = np.asarray(reward_forwards).sum() / _batchSize
+        sumReward_heading = np.asarray(reward_headings).sum() / _batchSize
+        sumReward_survive = np.asarray(reward_survives).sum() / _batchSize
+        stats = {'tickAvg':tickAvg,'sumRwd':sumRwd,'sumReward_contact':sumReward_contact,
+                'sumReward_ctrl':sumReward_ctrl,'sumReward_forward':sumReward_forward,
+                'sumReward_heading':sumReward_heading,'sumReward_survive':sumReward_survive}
+
+        return stats

@@ -360,7 +360,7 @@ def print_n_txt(_f,_chars,_addNewLine=True,_DO_PRINT=True,_DO_SAVE=True):
         Usage:
             txtName = ('../res/res_%s.txt'%(self.name))
             f = open(txtName,'w') # Open txt file
-            print_n_txt(_f=f,_chars='Text name: '+txtName,_DO_PRINT=True)
+            print_n_txt(_f=f,_chars='Text name: '+txtName,_DO_PRINT=True,_DO_SAVE=True)
     """
     if _DO_SAVE:
         if _addNewLine: _f.write(_chars+'\n')
@@ -368,3 +368,9 @@ def print_n_txt(_f,_chars,_addNewLine=True,_DO_PRINT=True,_DO_SAVE=True):
         _f.flush();os.fsync(_f.fileno()) # Write to txt
     if _DO_PRINT:
         print (_chars)
+
+
+def get_mean_var_from_list(_list):
+    meanVal = np.asarray(_list).mean()
+    varVal = np.asarray(_list).var()
+    return meanVal,varVal

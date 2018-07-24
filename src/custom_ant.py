@@ -21,7 +21,11 @@ def quaternion_to_euler_angle(w, x, y, z):
 	return X, Y, Z
 
 class AntEnvCustom(mujoco_env.MujocoEnv,utils.EzPickle):
-    def __init__(self):
+    def __init__(self,_headingCoef=1e-4):
+
+
+        self.headingCoef = _headingCoef # Heading penalty coef for reward
+
         print ("Custom Ant Environment made by SJ.")
         if sys.platform == 'darwin': # OSX
             xmlPath = '/Users/sungjoon/github/mujoco-ant/src/ant_custom.xml'
@@ -63,7 +67,7 @@ class AntEnvCustom(mujoco_env.MujocoEnv,utils.EzPickle):
         if forward_reward > 1.0: 
             forward_reward = 1.0
         # Heading cost
-        heading_cost = 1e-4*headingAfter**2
+        heading_cost = self.headingCoef*headingAfter**2
         # Control cost
         ctrl_cost = .5 * np.square(a).sum()
         # Contact cost
@@ -99,7 +103,7 @@ class AntEnvCustom(mujoco_env.MujocoEnv,utils.EzPickle):
         return self._get_obs()
 
     def viewer_setup(self):
-        self.viewer.cam.distance = self.model.stat.extent * 1.5
+        self.viewer.cam.distance = self.model.stat.extent * 2.5
 
     def get_heading(self):
         q = self.data.get_body_xquat('torso')

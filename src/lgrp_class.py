@@ -74,10 +74,10 @@ class lgrp_class(object):
         Ktt,_ = kernel_levse(tTest,tTest,lTest,lTest,hyp)
         xDataMean = xData.mean(axis=0)
         muTest = np.matmul(Ktd_mu,np.linalg.solve(
-            Kdd_mu+1e-9*np.eye(nData),xData-xDataMean))+xDataMean
+            Kdd_mu+1e-10*np.eye(nData),xData-xDataMean))+xDataMean
         _varTest = Ktt - np.matmul(Ktd_var,np.linalg.solve(
-            Kdd_var+1e-9*np.eye(nData),Ktd_var.T))
-        Rtt = np.linalg.cholesky(_varTest+1e-9*np.eye(self.nTest))
+            Kdd_var+1e-10*np.eye(nData),Ktd_var.T))
+        Rtt = np.linalg.cholesky(_varTest+1e-10*np.eye(self.nTest))
         varTest = np.diag(_varTest).reshape((-1,1))
         self.muTest,self._varTest,self.Rtt,self.varTest \
             = muTest,_varTest,Rtt,varTest
@@ -98,7 +98,7 @@ class lgrp_class(object):
         sampledPaths = self.sample_paths(_nPath=_nPath)
         cmap = plt.get_cmap('inferno')
         colors = [cmap(i) for i in np.linspace(0,1,dim+1)]
-        plt.figure(figsize=_figsize)
+        fig = plt.figure(figsize=_figsize)
         for dIdx in range(dim):
             # Plot 2-sigma
             sigmaTest = np.sqrt(varTest)
@@ -122,3 +122,4 @@ class lgrp_class(object):
                ['Anchor Points','Mean Function','Variance Function','Sampled Paths'],
                    fontsize=13)
         plt.show()
+        return fig
