@@ -24,6 +24,7 @@ class antTrainEnv_dlpg_class(object):
             _hypGainPost=1/3,_hypLenPost=1/4,
             _levBtw=0.8,_pGain=0.01,
             _zDim=16,_hDims=[64,64],_vaeActv=tf.nn.elu,_vaeOutActv=tf.nn.sigmoid,_vaeQactv=None,
+            _entRegCoef=1e-2,
             _PLOT_GRP=True,_SAVE_TXT=True,_VERBOSE=True):
         # Some parameters
         self.name = _name
@@ -40,6 +41,8 @@ class antTrainEnv_dlpg_class(object):
 
 
         if self.SAVE_TXT:
+            folderPath = 'results'
+            if not os.path.exists(folderPath): os.makedirs(folderPath)
             txtName = 'results/'+self.name+'.txt'
             self.f = open(txtName,'w') # Open txt file
             print_n_txt(_f=self.f,_chars='Text name: '+txtName,
@@ -91,7 +94,7 @@ class antTrainEnv_dlpg_class(object):
                              _zDim=_zDim,_hDims=_hDims,_cDim=0,
                              _actv=_vaeActv,_outActv=_vaeOutActv,_qActv=_vaeQactv,
                              _bn=None,
-                             _entRegCoef=1e-2,
+                             _entRegCoef=_entRegCoef,
                              _optimizer=optm,
                              _optm_param=optmParam,
                              _VERBOSE=False)
@@ -549,8 +552,7 @@ class antTrainEnv_dlpg_class(object):
                         if not os.path.exists(folderPath): os.makedirs(folderPath)
                         saveName = folderPath+'/grp_epoch%04d_%d.png'%(_epoch,_i)
                         fig.savefig(saveName)
-                        fig.close()
-                        
+
                         # Rollout
                         _,ret = self.unit_rollout_from_grp_mean(_maxRepeat=self.maxRepeat,_DO_RENDER=False)
                         str2print =  ("    [GRP-%d] sumRwd:%.3f=cntct:%.2f+ctrl:%.2f+fwd:%.2f+hd:%.2f+srv:%.2f) xD:[%.3f] hD:[%.1f]"%
