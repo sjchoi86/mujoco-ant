@@ -10,6 +10,7 @@ from util import gpu_sess,plot_imgs
 class vae_class(object):
     def __init__(self,_name='VAE',_xDim=784,_zDim=10,_hDims=[64,64],_cDim=0,
                  _actv=tf.nn.relu,_outActv=tf.nn.sigmoid,_qActv=tf.nn.tanh,_bn=slim.batch_norm,
+                 _entRegCoef=0,
                  _optimizer=tf.train.AdamOptimizer,
                  _optm_param={'lr':0.001,'beta1':0.9,'beta2':0.999,'epsilon':1e-9},
                  _VERBOSE=True):
@@ -22,6 +23,7 @@ class vae_class(object):
         self.outActv = _outActv
         self.qActv = _qActv
         self.bn    = _bn # Batch norm (slim.batch_norm / None)
+        self.entRegCoef = _entRegCoef
         self.optimizer = _optimizer # Optimizer
         self.optm_param = _optm_param # Optimizer parameters
         self.VERBOSE = _VERBOSE
@@ -81,7 +83,8 @@ class vae_class(object):
                                         ,scope='dec_dr'+str(hIdx))
                 # Reconstruct output 
                 self.xRecon = slim.fully_connected(_net,self.xDim,scope='xRecon',activation_fn=self.outActv)
-        # Additional graph for debugging purposes
+        
+        # self.zGiven => self.xGivenZ
         with tf.variable_scope(self.name,reuse=True) as scope:
             with slim.arg_scope([slim.fully_connected],activation_fn=self.actv,
                                weights_initializer=tf.random_normal_initializer(stddev=0.1),
@@ -100,6 +103,9 @@ class vae_class(object):
                     _net = slim.fully_connected(_net,_hDim,scope='dec_lin'+str(hIdx))
                 # Reconstruct output 
                 self.xGivenZ = slim.fully_connected(_net,self.xDim,scope='xRecon',activation_fn=self.outActv)
+        
+        
+
 
     def _build_graph(self):
         # Original VAE losses
@@ -130,8 +136,30 @@ class vae_class(object):
         _g_vars = tf.trainable_variables()
         self.c_vars = [var for var in _g_vars if '%s/'%(self.name) in var.name]
         self.l2Reg = self.l2RegCoef*tf.reduce_sum(tf.stack([tf.nn.l2_loss(v) for v in self.c_vars])) # [1]
+        
+        # Entropy regularizer (Zsampler => self.xSample)
+        with tf.variable_scope(self.name,reuse=True) as scope:
+            with slim.arg_scope([slim.fully_connected],activation_fn=self.actv,
+                               weights_initializer=tf.random_normal_initializer(stddev=0.1),
+                               biases_initializer=tf.constant_initializer(value=0.0),
+                               normalizer_fn=self.bn,normalizer_params=self.bnParams,
+                               weights_regularizer=None):
+                # Start from given z, instead of sampled z
+                _zSample = tf.random_normal(shape=(self.N,self.zDim),mean=0.,stddev=1.,dtype=tf.float32)
+                if self.cDim != 0: _zSample = tf.concat([_zSample,self.c],axis=1)
+                # Decoder 
+                _net = _zSample
+                for hIdx in range(len(self.hDims)): # Loop over hidden layers
+                    _hDim = self.hDims[len(self.hDims)-hIdx-1]
+                    _net = slim.fully_connected(_net,_hDim,scope='dec_lin'+str(hIdx))
+                # Reconstruct output 
+                self.xSample = slim.fully_connected(_net,self.xDim,scope='xRecon',activation_fn=self.outActv)
+        self._entReg = self.entRegCoef*tf.norm(self.xSample,ord=1,axis=1) # Shape?
+        self.entReg = tf.reduce_mean(self._entReg)
+
+        
         # Total loss
-        self.totalLoss = self.reconLossWeighted + self.klLossWeighted + self.l2Reg
+        self.totalLoss = self.reconLossWeighted + self.klLossWeighted + self.l2Reg + self.entReg
         # Solver
         if self.optimizer == tf.train.AdamOptimizer:
             self._optm = tf.train.AdamOptimizer(
@@ -196,15 +224,16 @@ class vae_class(object):
                 feeds = {self.x:xBatch,self.c:cBatch,self.q:qBatch,self.lr:lrVal,
                     self.klWeight:1.0,self.isTraining:True,self.kp:0.9}
             # Train
-            opers = [self.optm,self.totalLoss,self.reconLossWeighted,self.klLossWeighted,self.l2Reg]
-            _,totalLossVal,reconLossWeightedVal,klLossWeightedVal,l2RegVal =\
+            opers = [self.optm,self.totalLoss,self.reconLossWeighted,self.klLossWeighted,
+                    self.l2Reg,self.entReg]
+            _,totalLossVal,reconLossWeightedVal,klLossWeightedVal,l2RegVal,entRegVal =\
                  self.sess.run(opers,feed_dict=feeds)
             # Print 
             if _PRINT_EVERY != 0:
                 if ((_iter%_PRINT_EVERY)==0) | (_iter==(_maxIter-1)):
-                    print ("[%04d/%d][%.1f%%] Loss: %.2f(recon:%.2f+kl:%.2f+l2:%.2f)"%
+                    print ("[%04d/%d][%.1f%%] Loss: %.2f(recon:%.2f+kl:%.2f+l2:%.2f+ent:%.2f)"%
                         (_iter,_maxIter,100.*_iter/_maxIter,totalLossVal,reconLossWeightedVal,
-                        klLossWeightedVal,l2RegVal))
+                        klLossWeightedVal,l2RegVal,entRegVal))
             # Plot
             if _PLOT_EVERY != 0:
                 if ((_iter%_PLOT_EVERY)==0) | (_iter==(_maxIter-1)):

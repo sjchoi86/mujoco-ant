@@ -91,6 +91,7 @@ class antTrainEnv_dlpg_class(object):
                              _zDim=_zDim,_hDims=_hDims,_cDim=0,
                              _actv=_vaeActv,_outActv=_vaeOutActv,_qActv=_vaeQactv,
                              _bn=None,
+                             _entRegCoef=1e-2,
                              _optimizer=optm,
                              _optm_param=optmParam,
                              _VERBOSE=False)
@@ -480,7 +481,8 @@ class antTrainEnv_dlpg_class(object):
             scaledQ = qScale*(qTrain-qOffset)
             # print (scaledQ)
             self.VAE.train(_sess=self.sess,_X=xTrain,_Y=None,_C=None,_Q=scaledQ,
-                            _maxIter=_nIter4update,_batchSize=128,_PRINT_EVERY=0,_PLOT_EVERY=0,_INIT_VAR=False)
+                            _maxIter=_nIter4update,_batchSize=128,
+                            _PRINT_EVERY=10,_PLOT_EVERY=0,_INIT_VAR=False)
             # Print
             str2print = ("[%d/%d](#total:%d) avgQ:[%.3f] XdispMean:[%.3f] XdispVar:[%.3f] absHdispMean:[%.1f] priorProb:[%.2f]"%
                     (_epoch,_maxEpoch,(_epoch+1)*_batchSize,qList.mean(),
@@ -642,9 +644,16 @@ class antTrainEnv_dlpg_class(object):
 
 ## 
 class antTrainEnv_ppo_class(object):
-    def __init__(self,_name='ppo',_headingCoef=1e-3):
+    def __init__(self,_name='ppo',_headingCoef=1e-3,_SAVE_TXT=True):
         self.name = _name
         self.headingCoef = _headingCoef
+        self.SAVE_TXT = _SAVE_TXT
+
+        if self.SAVE_TXT:
+            txtName = 'results/'+self.name+'.txt'
+            self.f = open(txtName,'w') # Open txt file
+            print_n_txt(_f=self.f,_chars='Text name: '+txtName,
+                _DO_PRINT=True,_DO_SAVE=self.SAVE_TXT)
 
         self.env = AntEnvCustom(_headingCoef=self.headingCoef)
         self.obs_dim = self.env.observation_space.shape[0]
@@ -731,18 +740,23 @@ class antTrainEnv_ppo_class(object):
             sumReward_forward = np.asarray(reward_forwards).sum() / _batchSize
             sumReward_heading = np.asarray(reward_headings).sum() / _batchSize
             sumReward_survive = np.asarray(reward_survives).sum() / _batchSize
-            print ("[%d/%d](#total:%d) sumRwd:[%.3f](cntct:%.3f+ctrl:%.3f+fwd:%.3f+head:%.3f+srv:%.3f) tickAvg:[%d]"%
+            
+            # Print
+            str2print = ("[%d/%d](#total:%d) sumRwd:[%.3f](cntct:%.3f+ctrl:%.3f+fwd:%.3f+head:%.3f+srv:%.3f) tickAvg:[%d]"%
                 (_epoch,_maxEpoch,(_epoch+1)*_batchSize,sumRwd,
                 sumReward_contact,sumReward_ctrl,sumReward_forward,sumReward_heading,sumReward_survive,tickAvg))
-            #
+            print_n_txt(_f=self.f,_chars=str2print,_DO_PRINT=True,_DO_SAVE=self.SAVE_TXT)
+            
+            # Get status
             stats = self.get_current_stats(_batchSize=_batchSize,_maxSec=_maxSec)
             # print (stats)
-            print ("  [eval] sumRwd:[%.3f](cntct:%.3f+ctrl:%.3f+fwd:%.3f+head:%.3f+srv:%.3f) tickAvg:[%d]"%
+            str2print = ("  [eval] sumRwd:[%.3f](cntct:%.3f+ctrl:%.3f+fwd:%.3f+head:%.3f+srv:%.3f) tickAvg:[%d]"%
                 (stats['sumRwd'],
                 stats['sumReward_contact'],stats['sumReward_ctrl'],stats['sumReward_forward'],
                 stats['sumReward_heading'],stats['sumReward_survive'],stats['tickAvg']))
+            print_n_txt(_f=self.f,_chars=str2print,_DO_PRINT=True,_DO_SAVE=self.SAVE_TXT)
 
-            # SHOW EVERY 
+            # SHOW EVERY
             DO_ANIMATE = False
             if ((_epoch%_PLOT_EVERY)==0 ) | (_epoch==(_maxEpoch-1)):
                 ret = run_episode_vid(self.env,self.policy,self.scaler)
