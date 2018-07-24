@@ -549,6 +549,8 @@ class antTrainEnv_dlpg_class(object):
                         if not os.path.exists(folderPath): os.makedirs(folderPath)
                         saveName = folderPath+'/grp_epoch%04d_%d.png'%(_epoch,_i)
                         fig.savefig(saveName)
+                        fig.close()
+                        
                         # Rollout
                         _,ret = self.unit_rollout_from_grp_mean(_maxRepeat=self.maxRepeat,_DO_RENDER=False)
                         str2print =  ("    [GRP-%d] sumRwd:%.3f=cntct:%.2f+ctrl:%.2f+fwd:%.2f+hd:%.2f+srv:%.2f) xD:[%.3f] hD:[%.1f]"%
