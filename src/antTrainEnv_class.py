@@ -37,7 +37,7 @@ class antTrainEnv_dlpg_class(object):
         self.VERBOSE = _VERBOSE
 
         # Noramlize trajecotry
-        self.NORMALIZE_SCALE = True 
+        self.NORMALIZE_SCALE = False 
 
 
         if self.SAVE_TXT:
@@ -416,20 +416,24 @@ class antTrainEnv_dlpg_class(object):
         qLists = ['']*_maxEpoch
         
         for _epoch in range(_maxEpoch):
-            priorProb = 0.1+0.8*np.exp(-4*(_epoch/500)**2) # Schedule eps-greedish (0.9->0.1)
-            levBtw = 0.8+0.15*(1-priorProb) # Schedule leveraged GRP (0.8->0.95)
+            priorProb = 0.1+0.4*np.exp(-4*(_epoch/500)**2) # Schedule eps-greedish (0.5->0.1)
+            levBtw = 0.9+0.05*(1-priorProb) # Schedule leveraged GRP (0.8->0.95)
             xDispList,hDispList = np.zeros((_batchSize)),np.zeros((_batchSize))
             rSumList,rContactSumList,rCtrlSumList,rFwdSumList,rHeadingSumList,rSrvSumList = \
                 np.zeros((_batchSize)),np.zeros((_batchSize)),np.zeros((_batchSize)),\
                 np.zeros((_batchSize)),np.zeros((_batchSize)),np.zeros((_batchSize))
             for _iter in range(_batchSize):  
-                np.random.seed(seed=(_seed+_epoch*_batchSize+_iter)) # 
+                # np.random.seed(seed=(_seed+_epoch*_batchSize+_iter)) # 
 
                 # -------------------------------------------------------------------------------------------- #
                 if (np.random.rand()<priorProb) | (_epoch==0): # Sample from prior
                     _,ret = self.unit_rollout_from_grp_prior(self.maxRepeat)
                 else: # Sample from posterior (VAE)
                     sampledX = self.VAE.sample(_sess=self.sess).reshape((self.nAnchor,self.env.actDim))
+
+                    # Clip
+                    sampledX = np.clip(sampledX,a_min=-0.2,a_max=1.2)
+
                     if self.NORMALIZE_SCALE:
                         sampledX = (sampledX-sampledX.min())/(sampledX.max()-sampledX.min())
                     self.set_anchor_grp_posterior(_anchors=sampledX,_levBtw=levBtw)
@@ -469,7 +473,7 @@ class antTrainEnv_dlpg_class(object):
             # Add current episodes (batchSize)
             xTrain = np.concatenate((xTrain,xList),axis=0)
             qTrain = np.concatenate((qTrain,qList))
-            # Add random episodes (nRandomAdd)
+            # Add random episodes (nRandomAdd=_batchSize)
             nRandomAdd = _batchSize 
             randIdx = np.random.permutation(xAccList.shape[0])[:nRandomAdd]
             xRand = xAccList[randIdx,:]
@@ -478,14 +482,16 @@ class antTrainEnv_dlpg_class(object):
             qTrain = np.concatenate((qTrain,qRand))
             
             # Train
-            self.qScaler.reset() # Reset every update 
+            # self.qScaler.reset() # Reset every update 
             self.qScaler.update(qTrain) # Update Q scaler
             qScale,qOffset = self.qScaler.get() # Scaler 
             scaledQ = qScale*(qTrain-qOffset)
             # print (scaledQ)
             self.VAE.train(_sess=self.sess,_X=xTrain,_Y=None,_C=None,_Q=scaledQ,
                             _maxIter=_nIter4update,_batchSize=128,
-                            _PRINT_EVERY=10,_PLOT_EVERY=0,_INIT_VAR=False)
+                            _PRINT_EVERY=(_nIter4update//5),
+                            _PLOT_EVERY=0,
+                            _KL_SCHEDULE=True,_INIT_VAR=False)
             # Print
             str2print = ("[%d/%d](#total:%d) avgQ:[%.3f] XdispMean:[%.3f] XdispVar:[%.3f] absHdispMean:[%.1f] priorProb:[%.2f]"%
                     (_epoch,_maxEpoch,(_epoch+1)*_batchSize,qList.mean(),
@@ -500,12 +506,15 @@ class antTrainEnv_dlpg_class(object):
 
             # Print current Q using GRP mean 
             stats = self.get_current_stats()
-            str2print = ("[Stat] Q:[%.3f] xDispMean:[%.3f] hSqMean:[%.1f]"%
-                    (stats['rSumMean'],stats['xDispMean'],stats['hSqMean']))
+            str2print = ("[Stat] Q:[%.3f]=(cnt:%.1f+strl:%.1f+fwd:%.1f+hd:%.1f+srv:%.1f) xDispMean:[%.3f] hAbsMean:[%.1f]"%
+                    (stats['rSumMean'],
+                     stats['rContactSumMean'],stats['rCtrlSumMean'],stats['rFwdSumMean'],
+                     stats['rHeadingSumMean'],stats['rSrvSumMean'],
+                     stats['xDispMean'],stats['hAbsMean']))
             print_n_txt(_f=self.f,_chars=str2print,_DO_PRINT=True,_DO_SAVE=self.SAVE_TXT)
 
             """
-            stats = {'xDispMean':xDispMean,'hSqMean':hSqMean,'rSumMean':rSumMean,
+            stats = {'xDispMean':xDispMean,'hAbsMean':hAbsMean,hSqMean':hSqMean,'rSumMean':rSumMean,
             'rContactSumMean':rContactSumMean,'rCtrlSumMean':rCtrlSumMean,'rFwdSumMean':rFwdSumMean,
             'rHeadingSumMean':rHeadingSumMean,'rSrvSumMean':rSrvSumMean}
             """
@@ -541,7 +550,7 @@ class antTrainEnv_dlpg_class(object):
                 if _PLOT_GRP:
                     nrTrajectories2plot = 5
                     for _i in range(nrTrajectories2plot):
-                        np.random.seed(seed=_i)
+                        # np.random.seed(seed=_i)
                         sampledX = self.VAE.sample(_sess=self.sess).reshape((self.nAnchor,self.env.actDim))
                         if self.NORMALIZE_SCALE:
                             sampledX = (sampledX-sampledX.min())/(sampledX.max()-sampledX.min())
@@ -579,7 +588,7 @@ class antTrainEnv_dlpg_class(object):
               'rSum':rSum,'rContactSum':rContactSum,'rCtrlSum':rCtrlSum,
               'rFwdSum':rFwdSum,'rHeadingSum':rHeadingSum,'rSrvSum':rSrvSum}
         """
-        xDisps,hSqDisps = [],[]
+        xDisps,hAbsDisps,hSqDisps = [],[],[]
         rSums,rContactSums,rCtrlSums,rFwdSums,rHeadingSums,rSrvSums = [],[],[],[],[],[]
         # Rollout! 
         nTest4stat = 10
@@ -591,6 +600,7 @@ class antTrainEnv_dlpg_class(object):
             _,ret = self.unit_rollout_from_grp_mean(
                     _maxRepeat=self.maxRepeat,_DO_RENDER=False)
             xDisps.append(ret['xDisp'])
+            hAbsDisps.append(abs(ret['hDisp']))
             hSqDisps.append(ret['hDisp']**2)
             rSums.append(ret['rSum'])
             rContactSums.append(ret['rContactSum'])
@@ -600,6 +610,7 @@ class antTrainEnv_dlpg_class(object):
             rSrvSums.append(ret['rSrvSum'])
 
         xDispMean,_ = get_mean_var_from_list(xDisps)
+        hAbsMean,_ = get_mean_var_from_list(hAbsDisps)
         hSqMean,_ = get_mean_var_from_list(hSqDisps)
         rSumMean,_ = get_mean_var_from_list(rSums)
         rContactSumMean,_ = get_mean_var_from_list(rContactSums)
@@ -607,7 +618,8 @@ class antTrainEnv_dlpg_class(object):
         rFwdSumMean,_ = get_mean_var_from_list(rFwdSums)
         rHeadingSumMean,_ = get_mean_var_from_list(rHeadingSums)
         rSrvSumMean,_ = get_mean_var_from_list(rSrvSums)
-        stats = {'xDispMean':xDispMean,'hSqMean':hSqMean,'rSumMean':rSumMean,
+
+        stats = {'xDispMean':xDispMean,'hAbsMean':hAbsMean,'hSqMean':hSqMean,'rSumMean':rSumMean,
             'rContactSumMean':rContactSumMean,'rCtrlSumMean':rCtrlSumMean,'rFwdSumMean':rFwdSumMean,
             'rHeadingSumMean':rHeadingSumMean,'rSrvSumMean':rSrvSumMean}
         return stats

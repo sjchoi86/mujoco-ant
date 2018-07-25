@@ -126,10 +126,13 @@ class vae_class(object):
         self.reconLossWeighted = tf.reduce_mean(self._reconLossWeighted)
         # KL loss
         self._klLoss = 0.5*tf.reduce_sum(tf.exp(self.zLogVarEncoded)+self.zMuEncoded**2-1.-self.zLogVarEncoded,1)
+        self._klLoss = self.klWeight*self._klLoss
+        klMinTh = 0.1
+        self._klLoss = tf.clip_by_value(self._klLoss,klMinTh,np.inf)
         self._klLossWeighted = qVal*self._klLoss
         self._klLossWeighted = tf.clip_by_value(t=self._klLossWeighted,\
             clip_value_min=-1,clip_value_max=1e6) # <== Clip loss
-        self.klLossWeighted = self.klWeight*tf.reduce_mean(self._klLossWeighted)
+        self.klLossWeighted = tf.reduce_mean(self._klLossWeighted)
 
         # Weight decay
         self.l2RegCoef = 1e-5
@@ -188,7 +191,9 @@ class vae_class(object):
 
     # Train
     def train(self,_sess,_X,_Y,_C,_Q,_maxIter,_batchSize,_PRINT_EVERY=100,_PLOT_EVERY=100,
-        _imgSz=(28,28),_figsize=(15,2),_nR=1,_nC=10,_LR_SCHEDULE=True,_INIT_VAR=True):
+        _imgSz=(28,28),_figsize=(15,2),_nR=1,_nC=10,
+        _LR_SCHEDULE=True,_KL_SCHEDULE=False,
+        _INIT_VAR=True):
         # X: inputs [N x D]
         # C: condition vectors [N x 1]
         # Q: weighting vectors [N x 1]
@@ -211,6 +216,12 @@ class vae_class(object):
                 else: lrVal = self.optm_param['lr']*0.5*0.5
             else:
                 lrVal = self.optm_param['lr']*1.0
+
+            # KLD schedule
+            if _KL_SCHEDULE:
+                klWeight = (float)(_iter+1)/_maxIter
+            else:
+                klWeight = 1.0
             # Q batch
             if _Q is None:
                 qBatch = np.ones(shape=(_batchSize))
@@ -218,11 +229,11 @@ class vae_class(object):
                 qBatch = _Q[randIdx]
             if _C is None: # Original VAE (without conditioning)
                 feeds = {self.x:xBatch,self.q:qBatch,self.lr:lrVal,
-                    self.klWeight:1.0,self.isTraining:True,self.kp:0.9}
+                    self.klWeight:klWeight,self.isTraining:True,self.kp:0.9}
             else: # Conditional VAE
                 cBatch = _C[randIdx,:]
                 feeds = {self.x:xBatch,self.c:cBatch,self.q:qBatch,self.lr:lrVal,
-                    self.klWeight:1.0,self.isTraining:True,self.kp:0.9}
+                    self.klWeight:klWeight,self.isTraining:True,self.kp:0.9}
             # Train
             opers = [self.optm,self.totalLoss,self.reconLossWeighted,self.klLossWeighted,
                     self.l2Reg,self.entReg]
