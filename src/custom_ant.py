@@ -62,12 +62,13 @@ class AntEnvCustom(mujoco_env.MujocoEnv,utils.EzPickle):
         self.do_simulation(a, self.frame_skip) # Run!
         headingAfter = self.get_heading()
         xposafter = self.get_body_com("torso")[0]
+        yposafter = self.get_body_com("torso")[1]
         forward_reward = (xposafter - xposbefore)/self.dt 
         # Modified (upperbound on forward reward)
         if forward_reward > 1.0: 
             forward_reward = 1.0
         # Heading cost
-        heading_cost = self.headingCoef*headingAfter**2
+        heading_cost = self.headingCoef*(headingAfter**2+yposafter**2)
         # Control cost
         ctrl_cost = .5 * np.square(a).sum()
         # Contact cost
@@ -78,7 +79,7 @@ class AntEnvCustom(mujoco_env.MujocoEnv,utils.EzPickle):
         reward = forward_reward - heading_cost - ctrl_cost - contact_cost + survive_reward
         state = self.state_vector()
         notdone = np.isfinite(state).all() \
-            and state[2] >= 0.2 and state[2] <= 1.2
+            and state[2] >= 0.2 and state[2] <= 1.0
         done = not notdone
         ob = self._get_obs()
         return ob, reward, done,\
@@ -103,7 +104,7 @@ class AntEnvCustom(mujoco_env.MujocoEnv,utils.EzPickle):
         return self._get_obs()
 
     def viewer_setup(self):
-        self.viewer.cam.distance = self.model.stat.extent * 2.5
+        self.viewer.cam.distance = self.model.stat.extent * 3.0
 
     def get_heading(self):
         q = self.data.get_body_xquat('torso')
