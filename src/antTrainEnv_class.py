@@ -24,7 +24,7 @@ class antTrainEnv_dlpg_class(object):
             _hypGainPost=1/3,_hypLenPost=1/4,
             _levBtw=0.8,_pGain=0.01,
             _zDim=16,_hDims=[64,64],_vaeActv=tf.nn.elu,_vaeOutActv=tf.nn.sigmoid,_vaeQactv=None,
-            _entRegCoef=1e-2,
+            _entRegCoef=1e-2,_klMinTh=0.0,
             _PLOT_GRP=True,_SAVE_TXT=True,_VERBOSE=True):
         # Some parameters
         self.name = _name
@@ -55,10 +55,8 @@ class antTrainEnv_dlpg_class(object):
         nTest = (int)((self.tMax-self.tMin)/self.env.dt)
         tData = np.linspace(start=self.tMin,stop=self.tMax,num=nDataPrior).reshape((-1,1))
         xData = np.random.rand(nDataPrior,self.env.actDim) # Random positions 
-        xData[0,:] = (xData[0,:]+xData[-1,:])/2.0
+        # xData[0,:] = (xData[0,:]+xData[-1,:])/2.0
         xData[-1,:] = xData[0,:]
-        lData = np.ones(shape=(nDataPrior,1))
-
         lData = np.ones(shape=(nDataPrior,1))
         tTest = np.linspace(start=self.tMin,stop=self.tMax,num=nTest).reshape((-1,1))
         lTest = np.ones(shape=(nTest,1))
@@ -94,7 +92,7 @@ class antTrainEnv_dlpg_class(object):
                              _zDim=_zDim,_hDims=_hDims,_cDim=0,
                              _actv=_vaeActv,_outActv=_vaeOutActv,_qActv=_vaeQactv,
                              _bn=None,
-                             _entRegCoef=_entRegCoef,
+                             _entRegCoef=_entRegCoef,_klMinTh=_klMinTh,
                              _optimizer=optm,
                              _optm_param=optmParam,
                              _VERBOSE=False)
@@ -329,7 +327,7 @@ class antTrainEnv_dlpg_class(object):
         nTest = (int)((self.tMax-self.tMin)/self.env.dt)
         tData = np.linspace(start=self.tMin,stop=self.tMax,num=nDataPrior).reshape((-1,1))
         xData = np.random.rand(nDataPrior,self.env.actDim) # Random positions 
-        xData[0,:] = (xData[0,:]+xData[-1,:])/2.0
+        # xData[0,:] = (xData[0,:]+xData[-1,:])/2.0
         xData[-1,:] = xData[0,:]
         lData = np.ones(shape=(nDataPrior,1))
         self.GRPprior.set_data(_tData=tData,_xData=xData,_lData=lData,_EPS_RU=False)
@@ -415,8 +413,9 @@ class antTrainEnv_dlpg_class(object):
         xLists = ['']*_maxEpoch
         qLists = ['']*_maxEpoch
         
+
         for _epoch in range(_maxEpoch):
-            priorProb = 0.2+0.4*np.exp(-4*(_epoch/500)**2) # Schedule eps-greedish (0.5->0.1)
+            priorProb = 0.5*np.exp(-4*(_epoch/_maxEpoch)**2) # Schedule eps-greedish (0.5->0.0)
             levBtw = 0.9+0.05*(1-priorProb) # Schedule leveraged GRP (0.8->0.95)
             xDispList,hDispList = np.zeros((_batchSize)),np.zeros((_batchSize))
             rSumList,rContactSumList,rCtrlSumList,rFwdSumList,rHeadingSumList,rSrvSumList = \
@@ -502,7 +501,6 @@ class antTrainEnv_dlpg_class(object):
                 (rSumList.mean(),rContactSumList.mean(),rCtrlSumList.mean(),rFwdSumList.mean(),
                     rHeadingSumList.mean(),rSrvSumList.mean(),rSumList.max()))
             print_n_txt(_f=self.f,_chars=str2print,_DO_PRINT=True,_DO_SAVE=self.SAVE_TXT)
-
 
             # Print current Q using GRP mean 
             stats = self.get_current_stats()
@@ -775,7 +773,7 @@ class antTrainEnv_ppo_class(object):
             # SHOW EVERY
             DO_ANIMATE = False
             if ((_epoch%_PLOT_EVERY)==0 ) | (_epoch==(_maxEpoch-1)):
-                ret = run_episode_vid(self.env,self.policy,self.scaler)
+                ret = run_episode_vid(self.env,self.policy,self.scaler,_maxSec=_maxSec)
                 print ("  [^] sumRwd:[%.3f] Xdisp:[%.3f] hDisp:[%.1f]"%
                     (np.asarray(ret['rewards']).sum(),ret['xDisp'],ret['hDisp']))
                 if _MAKE_GIF:

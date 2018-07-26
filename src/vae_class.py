@@ -10,7 +10,7 @@ from util import gpu_sess,plot_imgs
 class vae_class(object):
     def __init__(self,_name='VAE',_xDim=784,_zDim=10,_hDims=[64,64],_cDim=0,
                  _actv=tf.nn.relu,_outActv=tf.nn.sigmoid,_qActv=tf.nn.tanh,_bn=slim.batch_norm,
-                 _entRegCoef=0,
+                 _entRegCoef=0,_klMinTh=0.0,
                  _optimizer=tf.train.AdamOptimizer,
                  _optm_param={'lr':0.001,'beta1':0.9,'beta2':0.999,'epsilon':1e-9},
                  _VERBOSE=True):
@@ -23,7 +23,8 @@ class vae_class(object):
         self.outActv = _outActv
         self.qActv = _qActv
         self.bn    = _bn # Batch norm (slim.batch_norm / None)
-        self.entRegCoef = _entRegCoef
+        self.entRegCoef = _entRegCoef # Entropy regularizer
+        self.klMinTh = _klMinTh # KL-divergence minimum threshold 
         self.optimizer = _optimizer # Optimizer
         self.optm_param = _optm_param # Optimizer parameters
         self.VERBOSE = _VERBOSE
@@ -127,8 +128,7 @@ class vae_class(object):
         # KL loss
         self._klLoss = 0.5*tf.reduce_sum(tf.exp(self.zLogVarEncoded)+self.zMuEncoded**2-1.-self.zLogVarEncoded,1)
         self._klLoss = self.klWeight*self._klLoss
-        klMinTh = 0.1
-        self._klLoss = tf.clip_by_value(self._klLoss,klMinTh,np.inf)
+        self._klLoss = tf.clip_by_value(self._klLoss,self.klMinTh,np.inf)
         self._klLossWeighted = qVal*self._klLoss
         self._klLossWeighted = tf.clip_by_value(t=self._klLossWeighted,\
             clip_value_min=-1,clip_value_max=1e6) # <== Clip loss
@@ -173,7 +173,7 @@ class vae_class(object):
                 learning_rate=self.lr)
         tvars = tf.trainable_variables()
         grads_and_vars = self._optm.compute_gradients(self.totalLoss,tvars)
-        clipped = [(tf.clip_by_value(grad, -5, 5), tvar) # gradient clipping
+        clipped = [(tf.clip_by_value(grad, -1.0, 1.0), tvar) # gradient clipping
                     for grad, tvar in grads_and_vars]
         self.optm = self._optm.apply_gradients(clipped,name="minimize_cost")
             
@@ -219,7 +219,7 @@ class vae_class(object):
 
             # KLD schedule
             if _KL_SCHEDULE:
-                klWeight = (float)(_iter+1)/_maxIter
+                klWeight = 0.5+0.5*((float)(_iter+1)/_maxIter)
             else:
                 klWeight = 1.0
             # Q batch
