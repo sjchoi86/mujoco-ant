@@ -85,7 +85,7 @@ class antTrainEnv_dlpg_class(object):
                         sample_time=self.env.dt,dim=self.env.actDim)
         # VAE (this will be our policy function)
         optm = tf.train.AdamOptimizer
-        optmParam = {'lr':0.001,'beta1':0.9,'beta2':0.999,'epsilon':1e-8}
+        optmParam = {'lr':0.0005,'beta1':0.9,'beta2':0.999,'epsilon':1e-8}
         # optm = tf.train.GradientDescentOptimizer
         # optmParam = {'lr':0.002}
         self.VAE = vae_class(_name=self.name,_xDim=self.nAnchor*self.env.actDim,
@@ -422,14 +422,14 @@ class antTrainEnv_dlpg_class(object):
                 np.zeros((_batchSize)),np.zeros((_batchSize)),np.zeros((_batchSize)),\
                 np.zeros((_batchSize)),np.zeros((_batchSize)),np.zeros((_batchSize))
             for _iter in range(_batchSize):  
-                # np.random.seed(seed=(_seed+_epoch*_batchSize+_iter)) # 
-
+                # np.random.seed(seed=(_seed+_epoch*_batchSize+_iter)) #
+                
                 # -------------------------------------------------------------------------------------------- #
                 if (np.random.rand()<priorProb) | (_epoch==0): # Sample from prior
                     _,ret = self.unit_rollout_from_grp_prior(self.maxRepeat)
                 else: # Sample from posterior (VAE)
                     sampledX = self.VAE.sample(_sess=self.sess).reshape((self.nAnchor,self.env.actDim))
-
+                    sampledX[-1,:] = sampledX[0,:]
                     # Clip
                     sampledX = np.clip(sampledX,a_min=-0.2,a_max=1.2)
 
@@ -473,7 +473,7 @@ class antTrainEnv_dlpg_class(object):
             xTrain = np.concatenate((xTrain,xList),axis=0)
             qTrain = np.concatenate((qTrain,qList))
             # Add random episodes (nRandomAdd=_batchSize)
-            nRandomAdd = _batchSize 
+            nRandomAdd = _batchSize // 5
             randIdx = np.random.permutation(xAccList.shape[0])[:nRandomAdd]
             xRand = xAccList[randIdx,:]
             qRand = qAccList[randIdx]
@@ -481,7 +481,7 @@ class antTrainEnv_dlpg_class(object):
             qTrain = np.concatenate((qTrain,qRand))
             
             # Train
-            # self.qScaler.reset() # Reset every update 
+            self.qScaler.reset() # Reset every update 
             self.qScaler.update(qTrain) # Update Q scaler
             qScale,qOffset = self.qScaler.get() # Scaler 
             scaledQ = qScale*(qTrain-qOffset)
@@ -521,6 +521,9 @@ class antTrainEnv_dlpg_class(object):
             if ((_epoch%_PLOT_EVERY)==0 ) | (_epoch==(_maxEpoch-1)):
                 # Rollout 
                 sampledX = self.VAE.sample(_sess=self.sess).reshape((self.nAnchor,self.env.actDim))
+                sampledX[-1,:] = sampledX[0,:]
+                # Clip
+                sampledX = np.clip(sampledX,a_min=-0.2,a_max=1.2)
                 if self.NORMALIZE_SCALE:
                     sampledX = (sampledX-sampledX.min())/(sampledX.max()-sampledX.min())
                 self.set_anchor_grp_posterior(_anchors=sampledX,_levBtw=levBtw)
@@ -550,6 +553,9 @@ class antTrainEnv_dlpg_class(object):
                     for _i in range(nrTrajectories2plot):
                         # np.random.seed(seed=_i)
                         sampledX = self.VAE.sample(_sess=self.sess).reshape((self.nAnchor,self.env.actDim))
+                        sampledX[-1,:] = sampledX[0,:]
+                        # Clip
+                        sampledX = np.clip(sampledX,a_min=-0.2,a_max=1.2)
                         if self.NORMALIZE_SCALE:
                             sampledX = (sampledX-sampledX.min())/(sampledX.max()-sampledX.min())
                         self.set_anchor_grp_posterior(_anchors=sampledX,_levBtw=levBtw)
@@ -592,6 +598,7 @@ class antTrainEnv_dlpg_class(object):
         nTest4stat = 10
         for _i in range(nTest4stat):
             sampledX = self.VAE.sample(_sess=self.sess).reshape((self.nAnchor,self.env.actDim))
+            sampledX[-1,:] = sampledX[0,:]
             if self.NORMALIZE_SCALE:
                 sampledX = (sampledX-sampledX.min())/(sampledX.max()-sampledX.min())
             self.set_anchor_grp_posterior(_anchors=sampledX,_levBtw=1.0)
@@ -631,6 +638,7 @@ class antTrainEnv_dlpg_class(object):
         if _seed is not None:
             np.random.seed(seed=_seed)
         sampledX = self.VAE.sample(_sess=self.sess,_seed=_seed).reshape((self.nAnchor,self.env.actDim))
+        sampledX[-1,:] = sampledX[0,:]
         if self.NORMALIZE_SCALE:
             sampledX = (sampledX-sampledX.min())/(sampledX.max()-sampledX.min())
         # Set GRP
