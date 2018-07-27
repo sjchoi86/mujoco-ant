@@ -23,7 +23,6 @@ def quaternion_to_euler_angle(w, x, y, z):
 class AntEnvCustom(mujoco_env.MujocoEnv,utils.EzPickle):
     def __init__(self,_headingCoef=1e-4):
 
-
         self.headingCoef = _headingCoef # Heading penalty coef for reward
 
         print ("Custom Ant Environment made by SJ.")

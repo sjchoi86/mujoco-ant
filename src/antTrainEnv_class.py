@@ -39,7 +39,6 @@ class antTrainEnv_dlpg_class(object):
         # Noramlize trajecotry
         self.NORMALIZE_SCALE = False 
 
-
         if self.SAVE_TXT:
             folderPath = 'results'
             if not os.path.exists(folderPath): os.makedirs(folderPath)
